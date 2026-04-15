@@ -14,6 +14,7 @@
 
 import {
   buildHTLCScript,
+  parseHTLCScript,
   btcHTLCAddress,
   fbcHTLCAddress,
   generatePreimage,
@@ -609,13 +610,25 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
     }
     const preimage = fromHex(preimageHex);
 
-    // Sanity check: hash matches the offer's hashlock.
-    const computed = toHex(hashlockOf(preimage));
-    if (computed !== bob.offer.hashlock.toLowerCase()) {
-      throw new Error("preimage does not match the offer's hashlock");
-    }
-
+    // Pull the hashlock straight from the witness script so we don't depend
+    // on bob.offer (which is null in resume mode). The script is the ground
+    // truth anyway — if the preimage doesn't hash to what the script commits
+    // to, nothing we try on-chain will work.
     const witnessScript = fromHex(bob.btcFunded.witness_script_hex);
+    const parsed = parseHTLCScript(witnessScript);
+    if (!parsed) throw new Error("witness script is not a valid HTLC");
+    const computed = toHex(hashlockOf(preimage));
+    const expectedHashlock = toHex(parsed.hashlock);
+    if (computed !== expectedHashlock) {
+      throw new Error(
+        `preimage does not match the HTLC's hashlock. ` +
+        `SHA256(preimage) = ${computed.slice(0, 16)}… ` +
+        `but the HTLC commits to ${expectedHashlock.slice(0, 16)}…. ` +
+        `(Hint: the 64-char hex from the "Unknown inputs not allowed" error ` +
+        `was a txid, not a preimage. The preimage comes from Alice's FBC ` +
+        `claim tx witness stack, item [1].)`,
+      );
+    }
     const feeRate = await fetchBtcFeeRate();
     const { psbtHex } = buildHTLCSpendPsbt({
       fundingTxid: bob.btcFunded.funding_txid,
