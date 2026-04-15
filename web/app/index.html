@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Swap — Fistbump</title>
+<meta name="description" content="Trustless peer-to-peer atomic swaps between Bitcoin and Fistbump. No custody, no matching, no fees.">
+<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="shortcut icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Fistbump Swap" />
+<link rel="preload" href="./fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="./fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="./fistbump.css">
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">
+  {
+    "imports": {
+      "@noble/hashes/sha256": "https://esm.sh/@noble/hashes@1.5.0/sha256?bundle",
+      "@noble/hashes/sha3": "https://esm.sh/@noble/hashes@1.5.0/sha3?bundle",
+      "@scure/base": "https://esm.sh/@scure/base@1.1.9?bundle"
+    }
+  }
+</script>
+</head>
+<body>
+
+<header class="header">
+  <div class="container header-inner">
+    <a href="/" class="logo">
+      <svg class="logo-icon" width="28" height="28" viewBox="-100 -100 1224 1224" xmlns="http://www.w3.org/2000/svg">
+        <rect x="-100" y="-100" width="1224" height="1224" rx="220" fill="white"/>
+        <g transform="matrix(1.69935,0,0,1.69935,-337.675,-337.675)">
+          <path d="M362,664.616L391.107,575.58L589.761,575.58L597.951,550.384L717.331,550.384L680.011,664.616L362,664.616ZM668.125,335.384L788.125,335.384L721.215,540.384L601.216,540.384L668.125,335.384ZM460.556,565.384L535.625,335.384L655.625,335.384L580.573,565.384L460.556,565.384ZM328.056,565.384L403.125,335.384L523.125,335.384L448.057,565.384L328.056,565.384ZM270.625,335.384L390.625,335.384L331.876,515.384L211.875,515.384L270.625,335.384Z" fill="black" fill-rule="nonzero"/>
+        </g>
+      </svg>
+      <span class="logo-text">Fistbump</span>
+    </a>
+    <nav class="nav">
+      <a href="https://fistbump.org">Home</a>
+      <a href="https://fbd.dev">Docs</a>
+      <a href="https://explorer.fistbump.org">Explorer</a>
+      <a href="#how">How it works</a>
+    </nav>
+    <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<nav class="mobile-nav" id="mobileNav">
+  <a href="https://fistbump.org">Home</a>
+  <a href="https://fbd.dev">Docs</a>
+  <a href="https://explorer.fistbump.org">Explorer</a>
+  <a href="#how">How it works</a>
+</nav>
+
+<main>
+
+<!-- ▬▬ Hero ▬▬ -->
+<section class="hero">
+  <div class="hero-grid"></div>
+  <div class="hero-glow"></div>
+  <div class="hero-glow-2"></div>
+  <div class="container hero-content">
+    <p class="hero-badge">Atomic swaps · non-custodial</p>
+    <h1 class="hero-title">Swap BTC and FBC,<br>peer to peer</h1>
+    <p class="hero-sub">
+      Two people, two wallets, two blockchains, one preimage. No custody, no
+      middleman, no fees — just the scripts each chain already understands.
+    </p>
+    <div class="role-switch" role="tablist" aria-label="Your side of the swap">
+      <button id="role-alice" class="role-btn" role="tab" aria-selected="true" data-role="alice">
+        <span class="role-title">I have BTC</span>
+        <span class="role-sub">I want FBC</span>
+      </button>
+      <button id="role-bob" class="role-btn" role="tab" aria-selected="false" data-role="bob">
+        <span class="role-title">I have FBC</span>
+        <span class="role-sub">I want BTC</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ▬▬ Flow: Alice ▬▬ -->
+<section class="flow" id="flow-alice">
+  <div class="container">
+    <ol class="steps">
+      <li class="step" data-step="1">
+        <div class="step-header">
+          <span class="step-number">1</span>
+          <h2 class="step-title">Connect your wallets</h2>
+        </div>
+        <div class="step-body">
+          <div class="wallet-row">
+            <div class="wallet">
+              <div class="wallet-label">Bitcoin</div>
+              <button id="btc-connect" class="btn">Connect Unisat</button>
+              <div class="wallet-status" id="btc-status">not connected</div>
+            </div>
+            <div class="wallet">
+              <div class="wallet-label">Fistbump</div>
+              <button id="fbc-connect" class="btn">Connect Fistbump</button>
+              <div class="wallet-status" id="fbc-status">not connected</div>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" data-step="2">
+        <div class="step-header">
+          <span class="step-number">2</span>
+          <h2 class="step-title">Set the terms</h2>
+        </div>
+        <div class="step-body">
+          <div class="field-row">
+            <label>
+              <span class="field-label">You send</span>
+              <div class="input-with-unit">
+                <input id="amount-btc" type="number" min="0" step="0.00000001" placeholder="0.00100000" />
+                <span class="unit">BTC</span>
+              </div>
+            </label>
+            <label>
+              <span class="field-label">You receive</span>
+              <div class="input-with-unit">
+                <input id="amount-fbc" type="number" min="0" step="0.000001" placeholder="10.000000" />
+                <span class="unit">FBC</span>
+              </div>
+            </label>
+          </div>
+          <div class="field-row">
+            <label>
+              <span class="field-label">BTC refund window</span>
+              <div class="input-with-unit">
+                <input id="btc-hours" type="number" min="1" max="168" value="24" />
+                <span class="unit">hours</span>
+              </div>
+            </label>
+            <label>
+              <span class="field-label">FBC refund window</span>
+              <div class="input-with-unit">
+                <input id="fbc-hours" type="number" min="2" max="336" value="48" />
+                <span class="unit">hours</span>
+              </div>
+            </label>
+          </div>
+          <p class="field-note" id="timelock-note"></p>
+          <button id="build-offer" class="btn primary" disabled>Generate offer</button>
+        </div>
+      </li>
+
+      <li class="step" data-step="3">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <h2 class="step-title">Send this to your counterparty</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Copy this line to your counterparty — Signal, email, whatever you
+            use. It is just public data: hashlock, your pubkeys, amounts, and
+            the two refund heights.
+          </p>
+          <div class="blob-panel">
+            <textarea id="offer-blob" readonly rows="5" class="blob" placeholder="Your offer blob will appear here…"></textarea>
+            <button id="copy-offer" class="btn">Copy</button>
+          </div>
+          <details class="reveal-details">
+            <summary>Show parsed offer</summary>
+            <pre id="offer-json"></pre>
+          </details>
+        </div>
+      </li>
+
+      <li class="step" data-step="4">
+        <div class="step-header">
+          <span class="step-number">4</span>
+          <h2 class="step-title">Paste their accept back here</h2>
+        </div>
+        <div class="step-body">
+          <textarea id="accept-blob-in" rows="3" class="blob" placeholder="fistbump-swap:v1:…"></textarea>
+          <button id="process-accept" class="btn primary" disabled>Verify and continue</button>
+          <p class="field-note" id="accept-status"></p>
+        </div>
+      </li>
+
+      <li class="step" data-step="5">
+        <div class="step-header">
+          <span class="step-number">5</span>
+          <h2 class="step-title">Fund your BTC HTLC</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Your wallet will build a standard segwit transaction that locks the
+            BTC into a script that only resolves to <em>them with your preimage</em>
+            or <em>you after the refund height</em>. No one else can touch it.
+          </p>
+          <div class="detail-card" id="btc-fund-summary"></div>
+          <button id="fund-btc" class="btn primary" disabled>Sign and broadcast</button>
+          <p class="field-note" id="btc-fund-status"></p>
+        </div>
+      </li>
+
+      <li class="step" data-step="6">
+        <div class="step-header">
+          <span class="step-number">6</span>
+          <h2 class="step-title">Wait for them to fund FBC, then claim</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Once the counterparty funds the FBC side, your wallet will claim it
+            by broadcasting a transaction that reveals your preimage. The reveal
+            is what lets the counterparty unlock the BTC you posted — that's
+            the atomic part.
+          </p>
+          <textarea id="funded-fbc-in" rows="3" class="blob" placeholder="Paste their funded_fbc blob"></textarea>
+          <button id="claim-fbc" class="btn primary" disabled>Claim my FBC</button>
+          <p class="field-note" id="claim-status"></p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ▬▬ Flow: Bob ▬▬ -->
+<section class="flow hidden" id="flow-bob">
+  <div class="container">
+    <ol class="steps">
+      <li class="step" data-step="1">
+        <div class="step-header">
+          <span class="step-number">1</span>
+          <h2 class="step-title">Connect your wallets</h2>
+        </div>
+        <div class="step-body">
+          <div class="wallet-row">
+            <div class="wallet">
+              <div class="wallet-label">Fistbump</div>
+              <button id="fbc-connect-bob" class="btn">Connect Fistbump</button>
+              <div class="wallet-status" id="fbc-status-bob">not connected</div>
+            </div>
+            <div class="wallet">
+              <div class="wallet-label">Bitcoin</div>
+              <button id="btc-connect-bob" class="btn">Connect Unisat</button>
+              <div class="wallet-status" id="btc-status-bob">not connected</div>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" data-step="2">
+        <div class="step-header">
+          <span class="step-number">2</span>
+          <h2 class="step-title">Paste the offer they sent you</h2>
+        </div>
+        <div class="step-body">
+          <textarea id="offer-blob-in" rows="3" class="blob" placeholder="fistbump-swap:v1:…"></textarea>
+          <button id="process-offer" class="btn primary" disabled>Check the offer</button>
+          <div class="detail-card hidden" id="offer-summary"></div>
+        </div>
+      </li>
+
+      <li class="step" data-step="3">
+        <div class="step-header">
+          <span class="step-number">3</span>
+          <h2 class="step-title">Send them your accept</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Your accept just contains your two pubkeys — that's everything the
+            counterparty needs to reconstruct the scripts independently.
+          </p>
+          <div class="blob-panel">
+            <textarea id="accept-blob" readonly rows="3" class="blob" placeholder="Your accept will appear here…"></textarea>
+            <button id="copy-accept" class="btn">Copy</button>
+          </div>
+        </div>
+      </li>
+
+      <li class="step" data-step="4">
+        <div class="step-header">
+          <span class="step-number">4</span>
+          <h2 class="step-title">Wait for their BTC funding, then fund FBC</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Never fund FBC before you've verified their BTC HTLC has confirmed
+            to at least 6 blocks. If they haven't funded, the worst case is you've
+            wasted time — but if you fund first and they never do, your FBC is
+            stuck until the timelock.
+          </p>
+          <textarea id="funded-btc-in" rows="3" class="blob" placeholder="Paste their funded_btc blob"></textarea>
+          <button id="fund-fbc" class="btn primary" disabled>Sign and broadcast FBC</button>
+          <p class="field-note" id="fbc-fund-status"></p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ▬▬ How it works ▬▬ -->
+<section class="how" id="how">
+  <div class="container">
+    <h2 class="section-title">How atomic swaps work</h2>
+    <div class="how-grid">
+      <div class="how-card">
+        <div class="how-step">A</div>
+        <h3>Shared secret</h3>
+        <p>
+          One party generates a 32-byte secret and hashes it. Only the hash is
+          shared. The hash is the puzzle piece; the secret is the key that solves it.
+        </p>
+      </div>
+      <div class="how-card">
+        <div class="how-step">B</div>
+        <h3>Matching locks</h3>
+        <p>
+          Both chains lock funds into scripts that say: <em>"to spend, either provide
+          the matching secret, or wait until the refund height."</em> Identical logic,
+          two chains.
+        </p>
+      </div>
+      <div class="how-card">
+        <div class="how-step">C</div>
+        <h3>The reveal</h3>
+        <p>
+          Claiming one side requires putting the secret in the transaction witness —
+          which makes the secret public. The other side uses that same secret to claim.
+        </p>
+      </div>
+      <div class="how-card">
+        <div class="how-step">D</div>
+        <h3>Or a refund</h3>
+        <p>
+          If anything goes wrong, the refund paths take over after the timelocks.
+          No one can be cheated out of their coins — worst case, you wait and get
+          your money back.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="container footer-inner">
+    <p>
+      Open source · non-custodial · no fees collected. The code this site runs
+      is the code in the repository — audit before trusting it with real funds.
+    </p>
+  </div>
+</footer>
+
+<script type="module" src="./app.js"></script>
+<script>
+  // Mobile nav toggle — matches web/ site pattern
+  (function() {
+    var btn = document.getElementById('menuToggle');
+    var nav = document.getElementById('mobileNav');
+    if (!btn || !nav) return;
+    btn.addEventListener('click', function() {
+      nav.classList.toggle('open');
+      document.body.classList.toggle('nav-open', nav.classList.contains('open'));
+    });
+    nav.addEventListener('click', function(e) {
+      if (e.target.tagName === 'A') {
+        nav.classList.remove('open');
+        document.body.classList.remove('nav-open');
+      }
+    });
+  })();
+</script>
+</body>
+</html>

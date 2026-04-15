@@ -1,0 +1,642 @@
+/*
+ * fistbump.css — Unified theme for all Fistbump projects
+ * Include this before project-specific styles.
+ *
+ * Fonts: IBM Plex Sans + IBM Plex Mono, latin subset, self-hosted from
+ * ./fonts/ next to this stylesheet. Each project that ships fistbump.css
+ * must also ship the matching fonts/ directory and serve it from the same
+ * relative path. See dev/sync-theme.sh.
+ */
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-400-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* Background */
+  --fb-bg:          #09090b;
+  --fb-bg-raised:   #111113;
+  --fb-bg-card:     #18181b;
+  --fb-bg-input:    #1e1e22;
+  --fb-bg-hover:    #27272a;
+
+  /* Borders */
+  --fb-border:      #27272a;
+  --fb-border-light:#3f3f46;
+
+  /* Text */
+  --fb-text:        #fafafa;
+  --fb-text-muted:  #a1a1aa;
+  --fb-text-dim:    #71717a;
+
+  /* Accent */
+  --fb-accent:      #57c7ed;
+  --fb-accent-dim:  rgba(87, 199, 237, 0.4);
+  --fb-accent-bg:   rgba(87, 199, 237, 0.08);
+
+  /* Semantic colors */
+  --fb-blue:        #60a5fa;
+  --fb-blue-bg:     rgba(96, 165, 250, 0.12);
+  --fb-yellow:      #fbbf24;
+  --fb-yellow-bg:   rgba(251, 191, 36, 0.12);
+  --fb-red:         #f87171;
+  --fb-red-bg:      rgba(248, 113, 113, 0.12);
+  --fb-green:       #4ade80;
+  --fb-green-bg:    rgba(74, 222, 128, 0.12);
+  --fb-purple:      #c084fc;
+  --fb-purple-bg:   rgba(192, 132, 252, 0.12);
+  --fb-teal:        #5eead4;
+  --fb-teal-bg:     rgba(94, 234, 212, 0.12);
+
+  /* Typography */
+  --fb-font-sans:   "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Helvetica, Arial, sans-serif;
+  --fb-font-mono:   "IBM Plex Mono", "SF Mono", "Cascadia Code", Menlo, monospace;
+  --fb-text-xs:     11px;
+  --fb-text-sm:     13px;
+  --fb-text-base:   14px;
+  --fb-text-lg:     16px;
+  --fb-text-xl:     18px;
+  --fb-text-2xl:    22px;
+  --fb-leading:     1.6;
+
+  /* Spacing */
+  --fb-space-xs:    4px;
+  --fb-space-sm:    8px;
+  --fb-space-md:    12px;
+  --fb-space-base:  16px;
+  --fb-space-lg:    24px;
+  --fb-space-xl:    40px;
+  --fb-space-2xl:   48px;
+
+  /* Radii */
+  --fb-radius-sm:   4px;
+  --fb-radius:      8px;
+  --fb-radius-lg:   12px;
+  --fb-radius-pill: 9999px;
+}
+
+body.light {
+  --fb-bg:          #f4f4f5;
+  --fb-bg-raised:   #ffffff;
+  --fb-bg-card:     #ffffff;
+  --fb-bg-input:    #f9f9fa;
+  --fb-bg-hover:    #e4e4e7;
+  --fb-border:      #e4e4e7;
+  --fb-border-light:#d4d4d8;
+  --fb-text:        #09090b;
+  --fb-text-muted:  #71717a;
+  --fb-text-dim:    #a1a1aa;
+  --fb-accent:      #2a9ec2;
+  --fb-accent-dim:  rgba(42, 158, 194, 0.4);
+  --fb-accent-bg:   rgba(42, 158, 194, 0.08);
+  --fb-blue:        #2563eb;
+  --fb-blue-bg:     rgba(37, 99, 235, 0.1);
+  --fb-yellow:      #ca8a04;
+  --fb-yellow-bg:   rgba(202, 138, 4, 0.1);
+  --fb-red:         #dc2626;
+  --fb-red-bg:      rgba(220, 38, 38, 0.1);
+  --fb-green:       #16a34a;
+  --fb-green-bg:    rgba(22, 163, 74, 0.1);
+  --fb-purple:      #9333ea;
+  --fb-purple-bg:   rgba(147, 51, 234, 0.1);
+  --fb-teal:        #0d9488;
+  --fb-teal-bg:     rgba(13, 148, 136, 0.1);
+}
+
+html { scroll-padding-top: var(--fb-space-lg); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+body {
+  font-family: var(--fb-font-sans);
+  background: var(--fb-bg);
+  color: var(--fb-text);
+  line-height: var(--fb-leading);
+  font-size: var(--fb-text-base);
+}
+
+a { color: var(--fb-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code, pre, .mono {
+  font-family: var(--fb-font-mono);
+}
+
+/* Inline code */
+code {
+  font-size: var(--fb-text-sm);
+  background: var(--fb-bg-card);
+  padding: 2px 6px;
+  border-radius: var(--fb-radius-sm);
+  color: var(--fb-accent);
+}
+pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+}
+
+/* Code blocks */
+pre {
+  background: var(--fb-bg-raised);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius);
+  padding: var(--fb-space-base);
+  font-size: var(--fb-text-sm);
+  line-height: var(--fb-leading);
+  overflow-x: auto;
+  color: var(--fb-text-muted);
+}
+
+/* Inputs */
+input, textarea, select {
+  font-family: var(--fb-font-sans);
+  font-size: var(--fb-text-sm);
+  color: var(--fb-text);
+  background: var(--fb-bg-input);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius);
+  padding: 0 var(--fb-space-md);
+  height: 34px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+textarea { height: auto; padding: var(--fb-space-sm) var(--fb-space-md); }
+input[type="checkbox"], input[type="radio"] { height: auto; }
+input::placeholder, textarea::placeholder { color: var(--fb-text-dim); }
+input:focus, textarea:focus, select:focus { border-color: var(--fb-accent); box-shadow: 0 0 0 3px rgba(87, 199, 237, 0.1); }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  height: 36px;
+  background: var(--fb-bg-card);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius);
+  color: var(--fb-text-muted);
+  font-family: var(--fb-font-sans);
+  font-size: var(--fb-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+  -webkit-user-select: none;
+  user-select: none;
+  text-decoration: none;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.btn:hover { border-color: var(--fb-border-light); color: var(--fb-text); text-decoration: none; }
+.btn.primary { background: var(--fb-accent); border-color: var(--fb-accent); color: #fff; }
+.btn.primary:hover { opacity: 0.85; }
+.btn.danger { background: var(--fb-red); border-color: var(--fb-red); color: #fff; }
+.btn.danger:hover { opacity: 0.85; }
+.btn.disabled { opacity: 0.35; pointer-events: none; }
+
+/* Cards */
+.fb-card {
+  background: var(--fb-bg-card);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-lg);
+  overflow: hidden;
+}
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left;
+  padding: 10px var(--fb-space-base);
+  font-size: var(--fb-text-xs);
+  font-weight: 600;
+  color: var(--fb-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--fb-border);
+  background: var(--fb-bg-raised);
+}
+td {
+  padding: 10px var(--fb-space-base);
+  font-size: var(--fb-text-base);
+  border-bottom: 1px solid var(--fb-bg-input);
+}
+tr:last-child td { border-bottom: none; }
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 2px var(--fb-space-sm);
+  border-radius: var(--fb-radius-sm);
+  font-size: var(--fb-text-sm);
+  font-weight: 500;
+  text-transform: uppercase;
+  margin: 1px 2px;
+}
+.badge-count  { margin-left: 1px; font-weight: 700; }
+.badge-count::before { content: '\00d7'; margin-right: 1px; font-weight: 400; }
+.badge-green  { background: var(--fb-green-bg);  color: var(--fb-green);  }
+.badge-red    { background: var(--fb-red-bg);    color: var(--fb-red);    }
+.badge-yellow { background: var(--fb-yellow-bg); color: var(--fb-yellow); }
+.badge-blue   { background: var(--fb-blue-bg);   color: var(--fb-blue);   }
+.badge-purple { background: var(--fb-purple-bg); color: var(--fb-purple); }
+.badge-gray   { background: var(--fb-bg-hover);  color: var(--fb-text-muted); }
+.badge-teal   { background: var(--fb-teal-bg);   color: var(--fb-teal);   }
+
+/* Auction timeline */
+.timeline { position: relative; }
+.tl-track { position: absolute; top: 9px; left: 12.5%; width: 75%; height: 2px; background: var(--fb-border); }
+.tl-fill { position: absolute; top: 9px; left: 12.5%; height: 2px; background: var(--fb-accent); }
+.tl-stages { display: flex; position: relative; }
+.tl-stage { flex: 1; text-align: center; position: relative; }
+.tl-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--fb-border); background: var(--fb-bg-card, var(--fb-bg)); margin: 0 auto 8px; position: relative; z-index: 1; }
+.tl-done .tl-dot { background: var(--fb-accent); border-color: var(--fb-accent); box-shadow: 0 0 8px rgba(87, 199, 237, 0.2); }
+.tl-active .tl-dot { background: var(--fb-accent); border-color: var(--fb-accent); box-shadow: 0 0 0 4px rgba(87, 199, 237, 0.25), 0 0 12px rgba(87, 199, 237, 0.2); }
+.tl-label { font-size: var(--fb-text-sm); font-weight: 600; margin-bottom: 4px; }
+.tl-done .tl-label { color: var(--fb-accent); }
+.tl-active .tl-label { color: var(--fb-accent); }
+.tl-future .tl-label { color: var(--fb-text-dim); }
+.tl-block { font-size: var(--fb-text-xs); color: var(--fb-text-muted); display: block; }
+.tl-time { font-size: var(--fb-text-xs); color: var(--fb-text-dim); display: block; margin-top: 2px; }
+
+/* Stat boxes */
+.fb-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--fb-border);
+  border-radius: var(--fb-radius-lg);
+  overflow: hidden;
+}
+.fb-stats-1 { grid-template-columns: 1fr; }
+.fb-stats-2 { grid-template-columns: repeat(2, 1fr); }
+.fb-stats-4 { grid-template-columns: repeat(2, 1fr); }
+.fb-stat {
+  background: var(--fb-bg-card, var(--fb-bg));
+  padding: var(--fb-space-base) 20px;
+}
+.fb-stat-label {
+  font-size: var(--fb-text-xs);
+  color: var(--fb-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--fb-space-xs);
+}
+.fb-stat-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* List / Row */
+.fb-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-base);
+}
+.fb-list:has(> .fb-row) {
+  gap: 0;
+}
+.fb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-md);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--fb-border);
+}
+.fb-row:last-child { border-bottom: none; }
+.fb-row label:not(.switch) {
+  width: 30%;
+  font-size: var(--fb-text-sm);
+  color: var(--fb-text-muted);
+  flex-shrink: 0;
+}
+.fb-row > span:last-child {
+  flex: 1;
+  text-align: right;
+  font-size: var(--fb-text-sm);
+}
+.fb-row input:not([type="checkbox"]):not([type="radio"]) {
+  flex: 1;
+}
+.fb-row select {
+  flex: 1;
+  -webkit-appearance: none;
+}
+.fb-row > label.switch {
+  margin-left: auto;
+}
+
+/* Utility */
+.truncate { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.muted { color: var(--fb-text-dim); }
+.green { color: var(--fb-green); }
+.red   { color: var(--fb-red); }
+
+/* Middle-truncating component for hashes and addresses
+ * Usage: <a class="trunc-mid"><span>prefix</span><span>suffix</span></a>
+ * The prefix span collapses when the parent runs out of room; the suffix
+ * span never shrinks, so the start AND the tail of the value stay
+ * readable. Stretches to fill its parent — give the parent a width or
+ * let it absorb table column slack.
+ *
+ * The prefix uses a mask-image fade on its right edge instead of the
+ * text-overflow keyword. text-overflow: ellipsis with U+2026 in IBM Plex
+ * Mono renders the dots in the left half of their character cell and
+ * leaves a half-cell of trailing void that looks like a gap. The fade
+ * is invisible when the content fits (the gradient sits past the text)
+ * and softens the truncation point when it doesn't. */
+.trunc-mid {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  vertical-align: bottom;
+  gap: 0;
+}
+.trunc-mid > :first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+.trunc-mid.is-truncated > :first-child {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 14px), transparent 100%);
+}
+.trunc-mid > :last-child {
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* Helper for cells that combine a fixed-width prefix (rank, badge, etc.)
+ * with a stretchy trunc-mid value. */
+.cell-stretch {
+  display: flex;
+  align-items: baseline;
+  gap: var(--fb-space-sm);
+  min-width: 0;
+}
+.cell-stretch > .trunc-mid {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Wrapper that keeps the FBC mark glued to its number across line breaks. */
+.fbc-amount { white-space: nowrap; }
+
+/* FBC currency mark — inline icon prefix used in front of every amount.
+ * Empty <span> styled with mask-image so it inherits text color via
+ * background-color: currentColor. SVG is embedded as a data URI so the
+ * same rule works in every project regardless of file layout. */
+.fbc-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.35em;
+  margin-left: 0.15em;
+  margin-right: 0.15em;
+  background-color: currentColor;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20576%20330'%3E%3Cg%20transform='matrix(1,0,0,1,-212,-335)'%3E%3Cpath%20d='M362,664.616L391.107,575.58L589.761,575.58L597.951,550.384L717.331,550.384L680.011,664.616L362,664.616ZM668.125,335.384L788.125,335.384L721.215,540.384L601.216,540.384L668.125,335.384ZM460.556,565.384L535.625,335.384L655.625,335.384L580.573,565.384L460.556,565.384ZM328.056,565.384L403.125,335.384L523.125,335.384L448.057,565.384L328.056,565.384ZM270.625,335.384L390.625,335.384L331.876,515.384L211.875,515.384L270.625,335.384Z'/%3E%3C/g%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20576%20330'%3E%3Cg%20transform='matrix(1,0,0,1,-212,-335)'%3E%3Cpath%20d='M362,664.616L391.107,575.58L589.761,575.58L597.951,550.384L717.331,550.384L680.011,664.616L362,664.616ZM668.125,335.384L788.125,335.384L721.215,540.384L601.216,540.384L668.125,335.384ZM460.556,565.384L535.625,335.384L655.625,335.384L580.573,565.384L460.556,565.384ZM328.056,565.384L403.125,335.384L523.125,335.384L448.057,565.384L328.056,565.384ZM270.625,335.384L390.625,335.384L331.876,515.384L211.875,515.384L270.625,335.384Z'/%3E%3C/g%3E%3C/svg%3E");
+  mask-size: contain;
+  mask-repeat: no-repeat;
+}
+
+/* Terminal windows */
+.fb-terminal {
+  background: var(--fb-bg-raised);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-lg);
+  overflow: hidden;
+}
+.fb-terminal-bar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 11px 16px;
+  background: rgba(24, 24, 27, 0.8);
+  border-bottom: 1px solid var(--fb-border);
+}
+.fb-terminal-dot { width: 11px; height: 11px; border-radius: 50%; }
+.fb-terminal-dot:nth-child(1) { background: var(--fb-red); }
+.fb-terminal-dot:nth-child(2) { background: var(--fb-yellow); }
+.fb-terminal-dot:nth-child(3) { background: var(--fb-green); }
+.fb-terminal-title {
+  margin-left: auto; font-size: var(--fb-text-xs);
+  color: var(--fb-text-dim); font-family: var(--fb-font-mono);
+}
+.fb-terminal-body { padding: 12px 16px; overflow-x: auto; }
+.fb-terminal-body code {
+  font-size: var(--fb-text-sm); line-height: 1.7;
+  color: var(--fb-text-muted);
+  background: none; border-radius: 0;
+  display: inline-block; white-space: pre; min-width: 100%;
+}
+
+/* Terminal syntax */
+.t-prompt { color: var(--fb-green); font-weight: 600; user-select: none; margin-right: 1ch; }
+.t-dim { color: var(--fb-text-dim); }
+.t-accent { color: var(--fb-accent); }
+.t-str { color: var(--fb-yellow); }
+
+/* Background glow */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1;
+  background: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(87, 199, 237, 0.07) 0%, transparent 70%);
+}
+
+/* Glass panels */
+.fb-glass {
+  background: rgba(24, 24, 27, 0.6);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(87, 199, 237, 0.08);
+}
+
+/* Scrollbar (webkit) */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--fb-border-light); border-radius: 2px; }
+
+/* ---- Responsive tables ----
+ * Add class="fb-table-responsive" to a <table> and data-label="..." to each
+ * <td>. Below 600px the header row is hidden and every data row reflows into
+ * a labeled card: the first cell is the card heading, the rest become
+ * label/value pairs stacked vertically. */
+.fb-table-responsive {
+  width: 100%;
+  min-width: 0;
+  table-layout: auto;
+}
+
+/* Force the parent .card into a grid track with minmax(0, 1fr). Without
+ * this, an unbreakable cell (64-char hash, long agent string) widens the
+ * whole table past the card and the trunc-mid's max-width: 100% has
+ * nothing concrete to be 100% of. */
+.card:has(> .fb-table-responsive) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+/* Desktop: every cell stays on a single line. Non-elastic cells size to
+ * their content. The cell that owns the elastic column (the one with a
+ * trunc-mid or cell-stretch inside) gets max-width: 0 so the standard
+ * auto-layout hack kicks in: other columns size to content, this one
+ * absorbs the leftover and clips its prefix with the trunc-mid's own
+ * ellipsis. */
+@media (min-width: 601px) {
+  .fb-table-responsive th,
+  .fb-table-responsive td {
+    white-space: nowrap;
+  }
+  .fb-table-responsive td:has(.trunc-mid),
+  .fb-table-responsive td:has(.cell-stretch) {
+    max-width: 0;
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 600px) {
+  .fb-table-responsive,
+  .fb-table-responsive tbody,
+  .fb-table-responsive tr,
+  .fb-table-responsive td {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+  }
+  .fb-table-responsive { overflow: hidden; }
+  .fb-table-responsive thead,
+  .fb-table-responsive th { display: none; }
+  .fb-table-responsive tr {
+    padding: 14px var(--fb-space-base);
+    border-bottom: 1px solid var(--fb-border);
+  }
+  .fb-table-responsive tr:last-child { border-bottom: none; }
+  .fb-table-responsive td {
+    position: relative;
+    padding: 4px 0 4px 110px;
+    border: none;
+    font-size: var(--fb-text-sm);
+    text-align: right;
+    min-height: 20px;
+    word-break: break-word;
+    overflow: hidden;
+  }
+  .fb-table-responsive td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 5px;
+    color: var(--fb-text-dim);
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .fb-table-responsive td:not([data-label])::before,
+  .fb-table-responsive td[data-label=""]::before { content: none; }
+  .fb-table-responsive td.stack {
+    display: block;
+    padding: 8px 0 0;
+    text-align: left;
+    min-height: 0;
+  }
+  .fb-table-responsive td.stack::before {
+    position: static;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .fb-table-responsive td.stack pre { white-space: pre-wrap; word-break: break-all; }
+  .fb-table-responsive tr > td:first-child {
+    display: block;
+    font-size: var(--fb-text-base);
+    font-weight: 500;
+    padding: 0 0 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--fb-bg-input);
+    overflow: hidden;
+    text-align: left;
+    min-height: 0;
+  }
+  .fb-table-responsive tr > td:first-child::before { display: none; }
+  .fb-table-responsive tr > td:first-child .truncate { max-width: 100%; display: block; }
+  .fb-table-responsive td > .truncate,
+  .fb-table-responsive td > a.truncate { max-width: 100%; }
+  .fb-table-responsive td > .badge { margin: 0 0 0 4px; }
+
+  /* Make .fb-stats phone-friendly: 3-col default becomes 2-col */
+  .fb-stats { grid-template-columns: repeat(2, 1fr); }
+  .fb-stats-1 { grid-template-columns: 1fr; }
+  .fb-stat { padding: var(--fb-space-md) var(--fb-space-base); }
+  .fb-stat-label { font-size: 10px; }
+  .fb-stat-value { font-size: var(--fb-text-base); }
+
+  /* More generous truncate on phones */
+  .truncate { max-width: 58vw; }
+
+  /* Buttons/inputs comfortable for touch */
+  .btn { min-height: 42px; padding: 0 var(--fb-space-base); }
+  input, textarea, select { height: 42px; font-size: var(--fb-text-base); }
+  textarea { height: auto; }
+  input[type="checkbox"], input[type="radio"] { height: auto; }
+
+  /* Cards/rows tighter horizontally */
+  .fb-row label:not(.switch) { width: 42%; }
+
+  /* Code blocks less padding */
+  pre { padding: var(--fb-space-md); font-size: 12px; }
+}
+
+@media (max-width: 380px) {
+  .fb-stat { padding: 10px 12px; }
+  .fb-stat-value { font-size: var(--fb-text-sm); }
+  .fb-table-responsive td > .truncate,
+  .fb-table-responsive td > a.truncate { max-width: 56vw; }
+}

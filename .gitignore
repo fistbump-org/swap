@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# web/core/dist is rebuilt by build.sh and copied into web/app/core;
+# only the deploy artifact in web/app/core is tracked.
+web/core/dist/
