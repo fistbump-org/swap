@@ -333,6 +333,23 @@
           <input id="preimage-in" class="blob" placeholder="deadbeef..." />
           <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
           <p class="field-note" id="claim-btc-status"></p>
+
+          <details class="reveal-details">
+            <summary>Sign externally (Sparrow, Electrum, etc.) if Unisat refuses</summary>
+            <p class="step-hint">
+              Some wallets (Unisat) don't sign P2WSH inputs with custom scripts.
+              If that's you: click <em>Export PSBT</em>, open Sparrow &rarr; File &rarr;
+              Load Transaction from Text, sign, copy the signed PSBT back below,
+              and hit <em>Finalize &amp; broadcast</em>. The preimage still needs
+              to be correct above.
+            </p>
+            <button id="export-psbt" class="btn">Export PSBT</button>
+            <textarea id="unsigned-psbt" readonly rows="3" class="blob" placeholder="Unsigned PSBT hex will appear here…"></textarea>
+            <label class="field-label" for="signed-psbt-in">Signed PSBT hex (from Sparrow)</label>
+            <textarea id="signed-psbt-in" rows="3" class="blob" placeholder="70736274ff…"></textarea>
+            <button id="finalize-external" class="btn primary">Finalize &amp; broadcast</button>
+            <p class="field-note" id="external-status"></p>
+          </details>
         </div>
       </li>
 

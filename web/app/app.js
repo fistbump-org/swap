@@ -685,6 +685,94 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
   }
 });
 
+// ---- Bob: export PSBT for external signing (Sparrow etc.) ----
+
+document.getElementById("export-psbt").addEventListener("click", async () => {
+  const statusEl = document.getElementById("external-status");
+  const out = document.getElementById("unsigned-psbt");
+  try {
+    if (!bob.btcFunded) throw new Error("no verified funded_btc in this session");
+    const preimageHex = document.getElementById("preimage-in").value.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(preimageHex)) {
+      throw new Error("enter the preimage first (64 hex chars)");
+    }
+    const preimage = fromHex(preimageHex);
+    const witnessScript = fromHex(bob.btcFunded.witness_script_hex);
+    const parsed = parseHTLCScript(witnessScript);
+    if (!parsed) throw new Error("witness script is not a valid HTLC");
+    if (toHex(hashlockOf(preimage)) !== toHex(parsed.hashlock)) {
+      throw new Error("preimage does not hash to the HTLC's hashlock");
+    }
+    // Destination: if Bob's Unisat is connected, use that address; otherwise
+    // ask inline. Signer can change it in Sparrow anyway before signing.
+    const dest = bob.btc?.address
+      || prompt("Destination BTC address for your claimed funds:")?.trim();
+    if (!dest) throw new Error("destination address required");
+
+    const feeRate = await fetchBtcFeeRate();
+    const { psbtHex } = buildHTLCSpendPsbt({
+      fundingTxid: bob.btcFunded.funding_txid,
+      fundingVout: bob.btcFunded.funding_vout,
+      fundingAmountSats: bob.btcFunded.funding_amount,
+      witnessScript,
+      destination: dest,
+      feeRateSatPerVb: feeRate,
+      branch: "claim",
+      network: BTC_NETWORK,
+    });
+    out.value = psbtHex;
+    // Stash for finalize step so we don't re-derive.
+    bob.externalPreimage = preimage;
+    bob.externalWitnessScript = witnessScript;
+    statusEl.textContent = "PSBT ready. Sign in Sparrow, then paste the signed PSBT below.";
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
+  }
+});
+
+document.getElementById("finalize-external").addEventListener("click", async () => {
+  const statusEl = document.getElementById("external-status");
+  try {
+    if (!bob.externalWitnessScript || !bob.externalPreimage) {
+      throw new Error("click Export PSBT first");
+    }
+    const signedPsbtHex = document.getElementById("signed-psbt-in").value.trim();
+    if (!signedPsbtHex) throw new Error("paste the signed PSBT first");
+    const { rawTxHex, txid } = finalizeHTLCSpend({
+      signedPsbtHex,
+      witnessScript: bob.externalWitnessScript,
+      branch: "claim",
+      preimage: bob.externalPreimage,
+    });
+    // Broadcast via mempool.space since Unisat may not cooperate.
+    const base =
+      BTC_NETWORK === "testnet"
+        ? "https://mempool.space/testnet/api"
+        : BTC_NETWORK === "main"
+          ? "https://mempool.space/api"
+          : null;
+    if (!base) throw new Error("regtest broadcast must use a local node");
+    const res = await fetch(`${base}/tx`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: rawTxHex,
+    });
+    const body = (await res.text()).trim();
+    if (!res.ok) throw new Error(`broadcast rejected: ${body}`);
+    statusEl.textContent = `BTC claim broadcast. txid=${(body || txid).slice(0, 12)}…`;
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
+  }
+});
+
 // ---- Bob: refund FBC if counterparty never claimed ----
 
 document.getElementById("refund-fbc").addEventListener("click", async () => {
