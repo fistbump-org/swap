@@ -420,7 +420,14 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
 
     const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
       autoFinalized: false,
-      toSignInputs: [{ index: 0, address: alice.btc.address, sighashTypes: [1] }],
+      toSignInputs: [
+        {
+          index: 0,
+          address: alice.btc.address,
+          publicKey: alice.btc.pubkey,
+          sighashTypes: [1],
+        },
+      ],
     });
 
     const { rawTxHex, txid } = finalizeHTLCSpend({
@@ -620,9 +627,19 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
       network: BTC_NETWORK,
     });
 
+    // Unisat refuses to sign inputs it can't classify unless we explicitly
+    // list both the address and the public key it should sign with — P2WSH
+    // with a custom HTLC script doesn't match any of its known templates.
     const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
       autoFinalized: false,
-      toSignInputs: [{ index: 0, address: bob.btc.address, sighashTypes: [1] }],
+      toSignInputs: [
+        {
+          index: 0,
+          address: bob.btc.address,
+          publicKey: bob.btc.pubkey,
+          sighashTypes: [1],
+        },
+      ],
     });
 
     const { rawTxHex, txid } = finalizeHTLCSpend({
