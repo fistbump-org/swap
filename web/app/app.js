@@ -426,6 +426,7 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
           address: alice.btc.address,
           publicKey: alice.btc.pubkey,
           sighashTypes: [1],
+          disableTweakSigner: true,
         },
       ],
     });
@@ -630,6 +631,11 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
     // Unisat refuses to sign inputs it can't classify unless we explicitly
     // list both the address and the public key it should sign with — P2WSH
     // with a custom HTLC script doesn't match any of its known templates.
+    // Unisat classifies inputs by output template. P2WSH with custom script
+    // falls into "other" which it refuses by default. The rescue is
+    // toSignInputs with explicit pubkey AND disableTweakSigner=true (the
+    // tweak signer path is for Taproot; forcing it off tells Unisat to
+    // produce a plain ECDSA signature, which is what CHECKSIG expects).
     const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
       autoFinalized: false,
       toSignInputs: [
@@ -638,6 +644,7 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
           address: bob.btc.address,
           publicKey: bob.btc.pubkey,
           sighashTypes: [1],
+          disableTweakSigner: true,
         },
       ],
     });
@@ -722,3 +729,50 @@ function renderSummary(container, rows) {
 
 updateAliceBuildOfferEnabled();
 updateBobButtons();
+
+// ---- Dev resume ----
+//
+// Add `?resume=bob-claim-btc&funded=<base64url>&preimage=<hex>` to the URL
+// to skip straight to Bob's step 5 with state preloaded, so iterating on
+// the BTC claim signing path doesn't require redoing the full swap each
+// time. `funded` is the `funded_btc` envelope Alice sent you; `preimage`
+// is the hex string.
+(async function maybeResume() {
+  const mode = params.get("resume");
+  if (!mode) return;
+  try {
+    if (mode === "bob-claim-btc") {
+      selectRole("bob");
+      // Pop a banner at the top of the Bob flow.
+      const banner = document.createElement("div");
+      banner.className = "field-note warn";
+      banner.style.cssText =
+        "border:1px solid var(--fb-accent-dim);padding:12px;border-radius:var(--fb-radius);margin-bottom:16px;";
+      banner.textContent =
+        "Resume mode: connect Unisat, then paste the preimage and click Claim my BTC. " +
+        "Other steps are skipped.";
+      flowBob.querySelector(".container").prepend(banner);
+
+      // Need Unisat connected to sign. Wallet-connect stays manual.
+      const fundedParam = params.get("funded");
+      if (!fundedParam) throw new Error("resume=bob-claim-btc requires ?funded=<blob>");
+      const envelope = fundedParam.startsWith("fistbump-swap:")
+        ? fundedParam
+        : `fistbump-swap:v1:${fundedParam}`;
+      const funded = decodeBlob(envelope);
+      if (funded.kind !== "funded_btc") {
+        throw new Error("?funded= must be a funded_btc envelope");
+      }
+      bob.btcFunded = funded;
+
+      const preimageParam = params.get("preimage");
+      if (preimageParam && /^[0-9a-f]{64}$/i.test(preimageParam)) {
+        document.getElementById("preimage-in").value = preimageParam.toLowerCase();
+      }
+      document.getElementById("claim-btc").disabled = false;
+    }
+  } catch (err) {
+    console.error("resume failed:", err);
+    alert("Resume failed: " + err.message);
+  }
+})();
