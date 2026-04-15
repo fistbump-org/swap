@@ -25,6 +25,27 @@ export declare function buildHTLCSpendPsbt(params: {
     psbtHex: string;
 };
 /**
+ * Sign an HTLC spend PSBT entirely in-browser with a WIF-encoded private
+ * key, returning the raw final tx ready for broadcast. Used when no
+ * browser wallet extension will sign a P2WSH input with a custom script
+ * (e.g. Unisat's "Unknown inputs not allowed" refusal).
+ *
+ * The private key is used in-memory, not persisted. @scure/btc-signer
+ * produces a standard ECDSA signature over the BIP143 sighash; we wrap
+ * it with the branch-specific witness stack and extract the final tx.
+ */
+export declare function signAndFinalizeWithWIF(params: {
+    psbtHex: string;
+    witnessScript: Uint8Array;
+    branch: "claim" | "refund";
+    preimage?: Uint8Array;
+    wif: string;
+    network: BtcNetwork;
+}): {
+    rawTxHex: string;
+    txid: string;
+};
+/**
  * After the wallet returns a signed PSBT, extract the signature and
  * assemble the branch-specific witness stack. Returns the raw final tx
  * ready for `window.unisat.pushTx` or any broadcast endpoint.

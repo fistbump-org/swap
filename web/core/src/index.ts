@@ -24,7 +24,7 @@ export {
   generateOfferId,
 } from "./offer.js";
 export { toHex, fromHex } from "./hex.js";
-export { buildHTLCSpendPsbt, finalizeHTLCSpend } from "./btc.js";
+export { buildHTLCSpendPsbt, finalizeHTLCSpend, signAndFinalizeWithWIF } from "./btc.js";
 
 export type {
   BtcNetwork,

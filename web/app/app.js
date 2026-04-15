@@ -29,6 +29,7 @@ import {
   fromHex,
   buildHTLCSpendPsbt,
   finalizeHTLCSpend,
+  signAndFinalizeWithWIF,
 } from "./core/index.js";
 
 // Network config. Hard-coded to mainnet for production; individual users can
@@ -725,6 +726,53 @@ document.getElementById("export-psbt").addEventListener("click", async () => {
     bob.externalPreimage = preimage;
     bob.externalWitnessScript = witnessScript;
     statusEl.textContent = "PSBT ready. Sign in Sparrow, then paste the signed PSBT below.";
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
+  }
+});
+
+document.getElementById("sign-with-wif").addEventListener("click", async () => {
+  const statusEl = document.getElementById("external-status");
+  const wifInput = document.getElementById("wif-in");
+  try {
+    if (!bob.externalWitnessScript || !bob.externalPreimage) {
+      throw new Error("click Export PSBT first");
+    }
+    const psbtHex = document.getElementById("unsigned-psbt").value.trim();
+    if (!psbtHex) throw new Error("click Export PSBT first");
+    const wif = wifInput.value.trim();
+    if (!wif) throw new Error("paste your WIF private key");
+
+    const { rawTxHex, txid } = signAndFinalizeWithWIF({
+      psbtHex,
+      witnessScript: bob.externalWitnessScript,
+      branch: "claim",
+      preimage: bob.externalPreimage,
+      wif,
+      network: BTC_NETWORK,
+    });
+    // Discard the WIF from the DOM immediately; we don't need it again.
+    wifInput.value = "";
+
+    const base =
+      BTC_NETWORK === "testnet"
+        ? "https://mempool.space/testnet/api"
+        : BTC_NETWORK === "main"
+          ? "https://mempool.space/api"
+          : null;
+    if (!base) throw new Error("regtest broadcast must use a local node");
+    const res = await fetch(`${base}/tx`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: rawTxHex,
+    });
+    const body = (await res.text()).trim();
+    if (!res.ok) throw new Error(`broadcast rejected: ${body}`);
+    statusEl.textContent = `BTC claim broadcast. txid=${(body || txid).slice(0, 12)}…`;
     statusEl.classList.remove("error");
     statusEl.classList.add("ok");
   } catch (err) {

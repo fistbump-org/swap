@@ -85,6 +85,38 @@ export function buildHTLCSpendPsbt(params) {
     return { psbtHex: hex.encode(tx.toPSBT()) };
 }
 /**
+ * Sign an HTLC spend PSBT entirely in-browser with a WIF-encoded private
+ * key, returning the raw final tx ready for broadcast. Used when no
+ * browser wallet extension will sign a P2WSH input with a custom script
+ * (e.g. Unisat's "Unknown inputs not allowed" refusal).
+ *
+ * The private key is used in-memory, not persisted. @scure/btc-signer
+ * produces a standard ECDSA signature over the BIP143 sighash; we wrap
+ * it with the branch-specific witness stack and extract the final tx.
+ */
+export function signAndFinalizeWithWIF(params) {
+    const { psbtHex, witnessScript, branch, preimage, wif, network } = params;
+    if (branch === "claim" && (!preimage || preimage.length !== 32)) {
+        throw new Error("claim branch requires a 32-byte preimage");
+    }
+    const net = NETWORKS[network];
+    const privateKey = btc.WIF(net).decode(wif);
+    const tx = btc.Transaction.fromPSBT(hex.decode(psbtHex));
+    tx.signIdx(privateKey, 0);
+    const input = tx.getInput(0);
+    const partial = input.partialSig;
+    if (!partial || partial.length !== 1) {
+        throw new Error("in-browser sign did not produce a single partialSig");
+    }
+    const sig = partial[0][1];
+    const witnessStack = branch === "claim"
+        ? [sig, preimage, Uint8Array.of(0x01), witnessScript]
+        : [sig, new Uint8Array(0), witnessScript];
+    tx.updateInput(0, { finalScriptWitness: witnessStack });
+    tx.finalize();
+    return { rawTxHex: hex.encode(tx.extract()), txid: tx.id };
+}
+/**
  * After the wallet returns a signed PSBT, extract the signature and
  * assemble the branch-specific witness stack. Returns the raw final tx
  * ready for `window.unisat.pushTx` or any broadcast endpoint.

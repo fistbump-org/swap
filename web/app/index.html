@@ -345,9 +345,24 @@
             </p>
             <button id="export-psbt" class="btn">Export PSBT</button>
             <textarea id="unsigned-psbt" readonly rows="3" class="blob" placeholder="Unsigned PSBT hex will appear here…"></textarea>
-            <label class="field-label" for="signed-psbt-in">Signed PSBT hex (from Sparrow)</label>
+
+            <p class="step-hint" style="margin-top:var(--fb-space-md);">
+              <strong>Or easier:</strong> paste your WIF private key here and we'll
+              sign + broadcast in-browser without touching any external wallet. The
+              key never leaves your tab; close it to discard. Export the WIF from
+              Unisat: Settings → Security → Export Private Key.
+            </p>
+            <label class="field-label" for="wif-in">Private key (WIF)</label>
+            <input id="wif-in" class="blob" type="password" placeholder="L… or K…" autocomplete="off" />
+            <button id="sign-with-wif" class="btn primary">Sign with WIF &amp; broadcast</button>
+
+            <p class="step-hint" style="margin-top:var(--fb-space-md);">
+              <strong>Or from Sparrow:</strong> sign the exported PSBT there, paste
+              the signed PSBT back:
+            </p>
+            <label class="field-label" for="signed-psbt-in">Signed PSBT hex</label>
             <textarea id="signed-psbt-in" rows="3" class="blob" placeholder="70736274ff…"></textarea>
-            <button id="finalize-external" class="btn primary">Finalize &amp; broadcast</button>
+            <button id="finalize-external" class="btn">Finalize &amp; broadcast</button>
             <p class="field-note" id="external-status"></p>
           </details>
         </div>
