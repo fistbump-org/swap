@@ -122,8 +122,13 @@ export function signAndFinalizeWithWIF(params) {
     const witnessStack = branch === "claim"
         ? [sig, preimage, Uint8Array.of(0x01), witnessScript]
         : [sig, new Uint8Array(0), witnessScript];
+    // Set the witness and skip finalize(). @scure/btc-signer's finalize()
+    // tries to rebuild the witness from partialSig + known templates; for
+    // an "unknown" input type it overwrites our manual witness with just
+    // [witnessScript], producing an empty stack at OP_IF and Bitcoin Core's
+    // SCRIPT_ERR_UNBALANCED_CONDITIONAL ("Invalid OP_IF construction").
+    // extract() alone is enough once finalScriptWitness is populated.
     tx.updateInput(0, { finalScriptWitness: witnessStack });
-    tx.finalize();
     return { rawTxHex: hex.encode(tx.extract()), txid: tx.id };
 }
 /**
@@ -158,9 +163,9 @@ export function finalizeHTLCSpend(params) {
     const witnessStack = branch === "claim"
         ? [sig, preimage, Uint8Array.of(0x01), witnessScript]
         : [sig, new Uint8Array(0), witnessScript];
+    // Skip finalize(): it overwrites our witness with just [witnessScript]
+    // for "unknown" script types. See signAndFinalizeWithWIF for details.
     tx.updateInput(0, { finalScriptWitness: witnessStack });
-    // Clear PSBT-only fields so the extracted tx is clean.
-    tx.finalize();
     const rawTxHex = hex.encode(tx.extract());
     return { rawTxHex, txid: tx.id };
 }
