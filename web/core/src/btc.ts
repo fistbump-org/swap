@@ -98,8 +98,15 @@ export function buildHTLCSpendPsbt(params: {
   }
   const sendValue = BigInt(fundingAmountSats - fee);
 
+  // allowUnknownInputs: the HTLC witness script doesn't match any of
+  // @scure/btc-signer's standard templates (pkh, wpkh, ms, tr, etc.), so
+  // the input classifier falls through to "unknown" and refuses to sign
+  // without this opt-in. Same reason Unisat refuses — this flag is the
+  // library-level equivalent of an advanced-mode toggle.
   const tx = new btc.Transaction({
     lockTime: branch === "refund" ? locktime : 0,
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
   });
   tx.addInput({
     txid: fundingTxid,
@@ -142,7 +149,10 @@ export function signAndFinalizeWithWIF(params: {
   const net = NETWORKS[network];
   const privateKey = btc.WIF(net).decode(wif);
 
-  const tx = btc.Transaction.fromPSBT(hex.decode(psbtHex));
+  const tx = btc.Transaction.fromPSBT(hex.decode(psbtHex), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  });
   tx.signIdx(privateKey, 0);
 
   const input = tx.getInput(0);
@@ -178,7 +188,10 @@ export function finalizeHTLCSpend(params: {
     throw new Error("claim branch requires a 32-byte preimage");
   }
 
-  const tx = btc.Transaction.fromPSBT(hex.decode(signedPsbtHex));
+  const tx = btc.Transaction.fromPSBT(hex.decode(signedPsbtHex), {
+    allowUnknownInputs: true,
+    allowUnknownOutputs: true,
+  });
   const input = tx.getInput(0);
   const partial = input.partialSig;
   if (!partial || partial.length === 0) {
