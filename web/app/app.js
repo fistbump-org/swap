@@ -249,10 +249,13 @@ async function fetchFbcTipHeight() {
           ? "https://explorer.testnet.fistbump.org/api"
           : null;
     if (base) {
-      const res = await fetch(`${base}/tip`);
+      // Explorer exposes the latest blocks via /api/blocks?limit=N ordered
+      // by height descending. Take the first and read its height.
+      const res = await fetch(`${base}/blocks?limit=1`);
       if (res.ok) {
-        const j = await res.json();
-        if (typeof j.height === "number") return j.height;
+        const blocks = await res.json();
+        const h = Array.isArray(blocks) && blocks[0] && Number(blocks[0].height);
+        if (Number.isInteger(h) && h > 0) return h;
       }
     }
   } catch {
