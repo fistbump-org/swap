@@ -25,6 +25,9 @@ import {
   verifyFundedBtc,
   verifyFundedFbc,
   toHex,
+  fromHex,
+  buildHTLCSpendPsbt,
+  finalizeHTLCSpend,
 } from "./core/index.js";
 
 // Network config. Hard-coded to mainnet for production; individual users can
@@ -61,6 +64,8 @@ const bob = {
   accept: null,
   btcScript: null,
   fbcScript: null,
+  fbcFundedTxid: null,
+  fbcFundedVout: null,
 };
 
 // ---- Role switch ----
@@ -201,6 +206,30 @@ async function fetchBtcTipHeight() {
   const n = Number(await res.text());
   if (!Number.isInteger(n) || n < 0) throw new Error("invalid tip height");
   return n;
+}
+
+async function fetchBtcFeeRate() {
+  // mempool.space recommended fee rate in sat/vB. Falls back to 20 if
+  // the service is unreachable — conservative for mainnet, wasteful for
+  // testnet but claim/refund timing matters more than fee efficiency.
+  try {
+    const base =
+      BTC_NETWORK === "testnet"
+        ? "https://mempool.space/testnet/api"
+        : BTC_NETWORK === "main"
+          ? "https://mempool.space/api"
+          : null;
+    if (!base) return 20;
+    const res = await fetch(`${base}/v1/fees/recommended`);
+    if (!res.ok) throw new Error(String(res.status));
+    const j = await res.json();
+    // Use halfHourFee so we clear within ~3 blocks; claim txs are
+    // time-sensitive, refund txs are not, but the same default is fine.
+    const rate = Number(j.halfHourFee);
+    return rate > 0 && isFinite(rate) ? rate : 20;
+  } catch {
+    return 20;
+  }
 }
 
 async function fetchFbcTipHeight() {
@@ -358,6 +387,56 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
 
 // ---- Alice: claim FBC ----
 
+// ---- Alice: refund BTC after T1 if counterparty never claimed ----
+
+document.getElementById("refund-btc").addEventListener("click", async () => {
+  const statusEl = document.getElementById("refund-btc-status");
+  try {
+    if (!alice.btcFundedTxid || !alice.btcScript) {
+      throw new Error("you haven't funded BTC in this session");
+    }
+    if (!confirm(
+      "Refund is only valid after the BTC refund height. " +
+      "If you already claimed FBC in step 6, DO NOT refund — " +
+      "the swap has already completed. Continue?"
+    )) return;
+
+    const witnessScript = alice.btcScript.scriptBytes;
+    const feeRate = await fetchBtcFeeRate();
+    const { psbtHex } = buildHTLCSpendPsbt({
+      fundingTxid: alice.btcFundedTxid,
+      fundingVout: alice.btcFundedVout,
+      fundingAmountSats: alice.offer.amount_btc,
+      witnessScript,
+      destination: alice.btc.address,
+      feeRateSatPerVb: feeRate,
+      branch: "refund",
+      locktime: alice.offer.btc_refund_height,
+      network: BTC_NETWORK,
+    });
+
+    const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
+      autoFinalized: false,
+      toSignInputs: [{ index: 0, address: alice.btc.address, sighashTypes: [1] }],
+    });
+
+    const { rawTxHex, txid } = finalizeHTLCSpend({
+      signedPsbtHex,
+      witnessScript,
+      branch: "refund",
+    });
+
+    const broadcastTxid = await window.unisat.pushTx(rawTxHex);
+    statusEl.textContent = `BTC refund broadcast. txid=${(broadcastTxid || txid).slice(0, 12)}…`;
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
+  }
+});
+
 document.getElementById("claim-fbc").addEventListener("click", async () => {
   const statusEl = document.getElementById("claim-status");
   try {
@@ -467,11 +546,12 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
     if (funded.kind !== "funded_btc") throw new Error("not a funded_btc blob");
     const v = verifyFundedBtc(bob.offer, bob.accept, funded);
     if (!v.ok) throw new Error(`funded_btc verification failed: ${v.reason}`);
+    // Keep the verified funded_btc around — Bob needs its txid, vout,
+    // amount, and script to build the claim PSBT in step 5.
+    bob.btcFunded = funded;
 
     const { fbc } = htlcsFromOfferAccept(bob.offer, bob.accept);
     bob.fbcScript = buildHTLCScript(fbc);
-    // Compute the FBC P2WSH address for display, even though the wallet
-    // computes its own commitment. Shows the user the real on-chain target.
     void fbcHTLCAddress(bob.fbcScript, FBC_NETWORK);
 
     const res = await window.fistbump.fundHtlc({
@@ -479,10 +559,8 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       amount: bob.offer.amount_fbc / 1e6,
       memo: `atomic swap ${bob.offer.offer_id.slice(0, 8)}`,
     });
-    statusEl.textContent =
-      `FBC HTLC funded. txid=${res.txid.slice(0, 12)}… funded_fbc blob copied to clipboard.`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    bob.fbcFundedTxid = res.txid;
+    bob.fbcFundedVout = res.vout;
 
     const fundedFbcBlob = encodeBlob({
       version: 1,
@@ -494,6 +572,99 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       witness_script_hex: toHex(bob.fbcScript.scriptBytes),
     });
     await navigator.clipboard.writeText(fundedFbcBlob);
+    statusEl.textContent =
+      `FBC HTLC funded. txid=${res.txid.slice(0, 12)}… funded_fbc blob copied to clipboard.`;
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
+
+    document.getElementById("claim-btc").disabled = false;
+    document.getElementById("refund-fbc").disabled = false;
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
+  }
+});
+
+// ---- Bob: claim BTC with revealed preimage ----
+
+document.getElementById("claim-btc").addEventListener("click", async () => {
+  const statusEl = document.getElementById("claim-btc-status");
+  try {
+    if (!bob.btcFunded) throw new Error("no verified funded_btc in this session");
+    const preimageHex = document.getElementById("preimage-in").value.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(preimageHex)) {
+      throw new Error("preimage must be 64 hex chars (32 bytes)");
+    }
+    const preimage = fromHex(preimageHex);
+
+    // Sanity check: hash matches the offer's hashlock.
+    const computed = toHex(hashlockOf(preimage));
+    if (computed !== bob.offer.hashlock.toLowerCase()) {
+      throw new Error("preimage does not match the offer's hashlock");
+    }
+
+    const witnessScript = fromHex(bob.btcFunded.witness_script_hex);
+    const feeRate = await fetchBtcFeeRate();
+    const { psbtHex } = buildHTLCSpendPsbt({
+      fundingTxid: bob.btcFunded.funding_txid,
+      fundingVout: bob.btcFunded.funding_vout,
+      fundingAmountSats: bob.btcFunded.funding_amount,
+      witnessScript,
+      destination: bob.btc.address,
+      feeRateSatPerVb: feeRate,
+      branch: "claim",
+      network: BTC_NETWORK,
+    });
+
+    const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
+      autoFinalized: false,
+      toSignInputs: [{ index: 0, address: bob.btc.address, sighashTypes: [1] }],
+    });
+
+    const { rawTxHex, txid } = finalizeHTLCSpend({
+      signedPsbtHex,
+      witnessScript,
+      branch: "claim",
+      preimage,
+    });
+
+    const broadcastTxid = await window.unisat.pushTx(rawTxHex);
+    statusEl.textContent = `BTC claim broadcast. txid=${(broadcastTxid || txid).slice(0, 12)}…`;
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.remove("ok");
+    statusEl.classList.add("error");
+  }
+});
+
+// ---- Bob: refund FBC if counterparty never claimed ----
+
+document.getElementById("refund-fbc").addEventListener("click", async () => {
+  const statusEl = document.getElementById("refund-fbc-status");
+  try {
+    if (!bob.fbcFundedTxid || !bob.fbcScript) {
+      throw new Error("you haven't funded FBC in this session");
+    }
+    if (!confirm(
+      "Refund is only valid after the FBC refund height. " +
+      "Continue?"
+    )) return;
+
+    const res = await window.fistbump.signHtlcSpend({
+      fundingTxid: bob.fbcFundedTxid,
+      fundingVout: bob.fbcFundedVout,
+      fundingAmount: bob.offer.amount_fbc,
+      witnessScriptHex: toHex(bob.fbcScript.scriptBytes),
+      branch: "refund",
+      destinationAddress: bob.fbc.address,
+      feeRate: 1000,
+    });
+    statusEl.textContent = `FBC refund broadcast. txid=${res.txid.slice(0, 12)}…`;
+    statusEl.classList.remove("error");
+    statusEl.classList.add("ok");
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");

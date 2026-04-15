@@ -19,7 +19,8 @@
     "imports": {
       "@noble/hashes/sha256": "https://esm.sh/@noble/hashes@1.5.0/sha256?bundle",
       "@noble/hashes/sha3": "https://esm.sh/@noble/hashes@1.5.0/sha3?bundle",
-      "@scure/base": "https://esm.sh/@scure/base@1.1.9?bundle"
+      "@scure/base": "https://esm.sh/@scure/base@1.1.9?bundle",
+      "@scure/btc-signer": "https://esm.sh/@scure/btc-signer@1.8.1?bundle"
     }
   }
 </script>
@@ -219,6 +220,25 @@
           <p class="field-note" id="claim-status"></p>
         </div>
       </li>
+
+      <li class="step" data-step="7">
+        <div class="step-header">
+          <span class="step-number">7</span>
+          <h2 class="step-title">If something went wrong — refund your BTC</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Only use this if the counterparty never funded their FBC HTLC and
+            the BTC refund height has passed. You can check the current BTC
+            tip on <a href="https://mempool.space/" target="_blank" rel="noreferrer">mempool.space</a>.
+            Don't touch this if you already claimed FBC in step 6 — your funds
+            are already on their way to the counterparty and trying to refund
+            will just waste a tx fee.
+          </p>
+          <button id="refund-btc" class="btn">Refund my BTC</button>
+          <p class="field-note" id="refund-btc-status"></p>
+        </div>
+      </li>
     </ol>
   </div>
 </section>
@@ -292,6 +312,43 @@
           <textarea id="funded-btc-in" rows="3" class="blob" placeholder="Paste their funded_btc blob"></textarea>
           <button id="fund-fbc" class="btn primary" disabled>Sign and broadcast FBC</button>
           <p class="field-note" id="fbc-fund-status"></p>
+        </div>
+      </li>
+
+      <li class="step" data-step="5">
+        <div class="step-header">
+          <span class="step-number">5</span>
+          <h2 class="step-title">Claim your BTC once they reveal the preimage</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            After the counterparty claims their FBC, the preimage is public in
+            that claim transaction's witness. Paste the preimage below (your
+            counterparty can share it, or you can read it off the FBC
+            explorer). Your wallet will then spend the BTC HTLC into your
+            Bitcoin address. <strong>Do this well before the BTC refund
+            height — if the counterparty refunds first, your FBC is gone.</strong>
+          </p>
+          <label class="field-label" for="preimage-in">Preimage (64 hex chars)</label>
+          <input id="preimage-in" class="blob" placeholder="deadbeef..." />
+          <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
+          <p class="field-note" id="claim-btc-status"></p>
+        </div>
+      </li>
+
+      <li class="step" data-step="6">
+        <div class="step-header">
+          <span class="step-number">6</span>
+          <h2 class="step-title">If they never claimed FBC — refund your FBC</h2>
+        </div>
+        <div class="step-body">
+          <p class="step-hint">
+            Only use this if the counterparty never claimed their FBC and the
+            FBC refund height has passed. Check the FBC tip on
+            <a href="https://explorer.fistbump.org" target="_blank" rel="noreferrer">explorer.fistbump.org</a>.
+          </p>
+          <button id="refund-fbc" class="btn">Refund my FBC</button>
+          <p class="field-note" id="refund-fbc-status"></p>
         </div>
       </li>
     </ol>

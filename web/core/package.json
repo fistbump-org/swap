@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@noble/hashes": "^1.5.0",
-    "@scure/base": "^1.1.9"
+    "@scure/base": "^1.1.9",
+    "@scure/btc-signer": "^1.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
