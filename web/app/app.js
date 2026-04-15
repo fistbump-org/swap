@@ -604,6 +604,11 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
   const statusEl = document.getElementById("claim-btc-status");
   try {
     if (!bob.btcFunded) throw new Error("no verified funded_btc in this session");
+    if (!bob.btc) {
+      throw new Error(
+        "connect Unisat first (step 1 above) — claim needs your BTC wallet to sign",
+      );
+    }
     const preimageHex = document.getElementById("preimage-in").value.trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(preimageHex)) {
       throw new Error("preimage must be 64 hex chars (32 bytes)");
