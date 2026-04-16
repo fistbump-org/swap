@@ -32,11 +32,15 @@ import {
   signAndFinalizeWithWIF,
 } from "./core/index.js";
 
-// Network config. Hard-coded to mainnet for production; individual users can
-// override via a `?network=testnet` query string for ad-hoc testing.
 const params = new URLSearchParams(location.search);
-const BTC_NETWORK = params.get("btc") || "main";
-const FBC_NETWORK = params.get("fbc") || "main";
+const BTC_NETWORK = "main";
+const FBC_NETWORK = "main";
+
+// Blockstream Esplora for BTC data + broadcast. 3xpl for explorer links.
+const BTC_API = "https://blockstream.info/api";
+const BTC_EXPLORER = "https://3xpl.com/bitcoin/transaction";
+const FBC_EXPLORER = "https://explorer.fistbump.org";
+const FBC_API = "https://explorer.fistbump.org/api";
 
 // Block time heuristics for converting refund-window hours → block heights.
 // These match SPEC.md §4.2 defaults.
@@ -195,45 +199,25 @@ function updateAliceBuildOfferEnabled() {
 }
 
 async function fetchBtcTipHeight() {
-  const base =
-    BTC_NETWORK === "testnet"
-      ? "https://mempool.space/testnet/api"
-      : BTC_NETWORK === "regtest"
-        ? (() => {
-            throw new Error("regtest BTC tip requires a local explorer");
-          })()
-        : "https://mempool.space/api";
-  const res = await fetch(`${base}/blocks/tip/height`);
-  if (!res.ok) throw new Error(`mempool.space tip fetch failed: ${res.status}`);
+  const res = await fetch(`${BTC_API}/blocks/tip/height`);
+  if (!res.ok) throw new Error(`BTC tip fetch failed: ${res.status}`);
   const n = Number(await res.text());
   if (!Number.isInteger(n) || n < 0) throw new Error("invalid tip height");
   return n;
 }
 
 async function fetchBtcFeeRate() {
-  // mempool.space recommended fee rate in sat/vB. Falls back to 20 if
-  // the service is unreachable.
-  //
-  // Floor at 3 sat/vB: HTLC claim/refund txs are time-sensitive — if the
-  // claim doesn't confirm before T1, the counterparty can refund and the
-  // claimer loses their funds. mempool.space's halfHourFee can dip to
-  // 1 sat/vB during quiet periods, which is below Bitcoin Core's default
-  // relay minimum and may never confirm. The floor is an HTLC-specific
-  // safety margin, not a reflection of network conditions.
+  // Blockstream Esplora fee-estimates returns { "1": N, "3": N, "6": N, ... }
+  // where key = target blocks, value = sat/vB. Use target 3 (~30 min).
+  // Floor at 3 sat/vB: HTLC claims are time-sensitive and sub-1 sat/vB
+  // txs may never relay.
   const FLOOR = 3;
   try {
-    const base =
-      BTC_NETWORK === "testnet"
-        ? "https://mempool.space/testnet/api"
-        : BTC_NETWORK === "main"
-          ? "https://mempool.space/api"
-          : null;
-    if (!base) return 20;
-    const res = await fetch(`${base}/v1/fees/recommended`);
+    const res = await fetch(`${BTC_API}/fee-estimates`);
     if (!res.ok) throw new Error(String(res.status));
     const j = await res.json();
-    const rate = Number(j.halfHourFee);
-    const chosen = rate > 0 && isFinite(rate) ? rate : 20;
+    const rate = Number(j["3"]);
+    const chosen = rate > 0 && isFinite(rate) ? Math.ceil(rate) : 20;
     return Math.max(chosen, FLOOR);
   } catch {
     return 20;
@@ -241,37 +225,12 @@ async function fetchBtcFeeRate() {
 }
 
 async function fetchFbcTipHeight() {
-  try {
-    if (window.fistbump && typeof window.fistbump.getTipHeight === "function") {
-      const r = await window.fistbump.getTipHeight();
-      if (typeof r === "number") return r;
-    }
-  } catch {
-    /* fall through */
-  }
-  try {
-    const base =
-      FBC_NETWORK === "main"
-        ? "https://explorer.fistbump.org/api"
-        : FBC_NETWORK === "testnet"
-          ? "https://explorer.testnet.fistbump.org/api"
-          : null;
-    if (base) {
-      // Explorer exposes the latest blocks via /api/blocks?limit=N ordered
-      // by height descending. Take the first and read its height.
-      const res = await fetch(`${base}/blocks?limit=1`);
-      if (res.ok) {
-        const blocks = await res.json();
-        const h = Array.isArray(blocks) && blocks[0] && Number(blocks[0].height);
-        if (Number.isInteger(h) && h > 0) return h;
-      }
-    }
-  } catch {
-    /* fall through */
-  }
-  throw new Error(
-    "could not fetch FBC tip height — run with ?fbc=regtest for local testing",
-  );
+  const res = await fetch(`${FBC_API}/blocks?limit=1`);
+  if (!res.ok) throw new Error(`FBC tip fetch failed: ${res.status}`);
+  const blocks = await res.json();
+  const h = Array.isArray(blocks) && blocks[0] && Number(blocks[0].height);
+  if (Number.isInteger(h) && h > 0) return h;
+  throw new Error("could not parse FBC tip height");
 }
 
 buildOfferBtn.addEventListener("click", async () => {
@@ -805,14 +764,7 @@ document.getElementById("sign-with-wif").addEventListener("click", async () => {
     // Discard the WIF from the DOM immediately; we don't need it again.
     wifInput.value = "";
 
-    const base =
-      BTC_NETWORK === "testnet"
-        ? "https://mempool.space/testnet/api"
-        : BTC_NETWORK === "main"
-          ? "https://mempool.space/api"
-          : null;
-    if (!base) throw new Error("regtest broadcast must use a local node");
-    const res = await fetch(`${base}/tx`, {
+    const res = await fetch(`${BTC_API}/tx`, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: rawTxHex,
@@ -845,15 +797,8 @@ document.getElementById("finalize-external").addEventListener("click", async () 
       branch: "claim",
       preimage: bob.externalPreimage,
     });
-    // Broadcast via mempool.space since Unisat may not cooperate.
-    const base =
-      BTC_NETWORK === "testnet"
-        ? "https://mempool.space/testnet/api"
-        : BTC_NETWORK === "main"
-          ? "https://mempool.space/api"
-          : null;
-    if (!base) throw new Error("regtest broadcast must use a local node");
-    const res = await fetch(`${base}/tx`, {
+    // Broadcast via Blockstream Esplora since Unisat may not cooperate.
+    const res = await fetch(`${BTC_API}/tx`, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: rawTxHex,
@@ -950,25 +895,11 @@ function renderTxStatus(statusEl, opts) {
   explorer.textContent = "Open in explorer";
   explorer.style.cssText = "font-size:12px;";
   if (chain === "btc") {
-    const base =
-      BTC_NETWORK === "testnet"
-        ? "https://mempool.space/testnet/tx/"
-        : BTC_NETWORK === "main"
-          ? "https://mempool.space/tx/"
-          : null;
-    if (base) explorer.href = base + txid;
-    else explorer.textContent = "";
+    explorer.href = `${BTC_EXPLORER}/${txid}`;
   } else if (chain === "fbc") {
-    const base =
-      FBC_NETWORK === "main"
-        ? "https://explorer.fistbump.org/tx/"
-        : FBC_NETWORK === "testnet"
-          ? "https://explorer.testnet.fistbump.org/tx/"
-          : null;
-    if (base) explorer.href = base + txid;
-    else explorer.textContent = "";
+    explorer.href = `${FBC_EXPLORER}/tx/${txid}`;
   }
-  if (explorer.href) statusEl.appendChild(explorer);
+  statusEl.appendChild(explorer);
 
   if (followup) {
     statusEl.appendChild(document.createElement("br"));
