@@ -25,6 +25,7 @@ export {
 } from "./offer.js";
 export { toHex, fromHex } from "./hex.js";
 export { buildHTLCSpendPsbt, finalizeHTLCSpend, signAndFinalizeWithWIF } from "./btc.js";
+export { blobQrDataUrl } from "./qr.js";
 
 export type {
   BtcNetwork,
