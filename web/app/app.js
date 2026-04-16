@@ -378,10 +378,12 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
       witness_script_hex: toHex(alice.btcScript.scriptBytes),
     });
     await navigator.clipboard.writeText(fundedBlob);
-    statusEl.textContent =
-      `Funded. txid=${txid.slice(0, 12)}… funded_btc blob copied to clipboard — send it to your counterparty.`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "BTC funding broadcast.",
+      txid,
+      chain: "btc",
+      followup: "funded_btc blob copied to your clipboard — send it to your counterparty.",
+    });
     document.getElementById("claim-fbc").disabled = false;
   } catch (err) {
     statusEl.textContent = err.message;
@@ -440,9 +442,11 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
     });
 
     const broadcastTxid = await window.unisat.pushTx(rawTxHex);
-    statusEl.textContent = `BTC refund broadcast. txid=${(broadcastTxid || txid).slice(0, 12)}…`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "BTC refund broadcast.",
+      txid: broadcastTxid || txid,
+      chain: "btc",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -469,10 +473,12 @@ document.getElementById("claim-fbc").addEventListener("click", async () => {
       destinationAddress: alice.fbc.address,
       feeRate: 1000,
     });
-    statusEl.textContent =
-      `Claim broadcast. txid=${res.txid.slice(0, 12)}… Counterparty can now claim BTC.`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "FBC claim broadcast.",
+      txid: res.txid,
+      chain: "fbc",
+      followup: "Counterparty can now claim their BTC using the preimage revealed on this tx.",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -585,10 +591,12 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       witness_script_hex: toHex(bob.fbcScript.scriptBytes),
     });
     await navigator.clipboard.writeText(fundedFbcBlob);
-    statusEl.textContent =
-      `FBC HTLC funded. txid=${res.txid.slice(0, 12)}… funded_fbc blob copied to clipboard.`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "FBC HTLC funded.",
+      txid: res.txid,
+      chain: "fbc",
+      followup: "funded_fbc blob copied to your clipboard — send it to your counterparty.",
+    });
 
     document.getElementById("claim-btc").disabled = false;
     document.getElementById("refund-fbc").disabled = false;
@@ -676,9 +684,11 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
     });
 
     const broadcastTxid = await window.unisat.pushTx(rawTxHex);
-    statusEl.textContent = `BTC claim broadcast. txid=${(broadcastTxid || txid).slice(0, 12)}…`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "BTC claim broadcast.",
+      txid: broadcastTxid || txid,
+      chain: "btc",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -772,9 +782,11 @@ document.getElementById("sign-with-wif").addEventListener("click", async () => {
     });
     const body = (await res.text()).trim();
     if (!res.ok) throw new Error(`broadcast rejected: ${body}`);
-    statusEl.textContent = `BTC claim broadcast. txid=${(body || txid).slice(0, 12)}…`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "BTC claim broadcast.",
+      txid: body || txid,
+      chain: "btc",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -811,9 +823,11 @@ document.getElementById("finalize-external").addEventListener("click", async () 
     });
     const body = (await res.text()).trim();
     if (!res.ok) throw new Error(`broadcast rejected: ${body}`);
-    statusEl.textContent = `BTC claim broadcast. txid=${(body || txid).slice(0, 12)}…`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "BTC claim broadcast.",
+      txid: body || txid,
+      chain: "btc",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -843,9 +857,11 @@ document.getElementById("refund-fbc").addEventListener("click", async () => {
       destinationAddress: bob.fbc.address,
       feeRate: 1000,
     });
-    statusEl.textContent = `FBC refund broadcast. txid=${res.txid.slice(0, 12)}…`;
-    statusEl.classList.remove("error");
-    statusEl.classList.add("ok");
+    renderTxStatus(statusEl, {
+      label: "FBC refund broadcast.",
+      txid: res.txid,
+      chain: "fbc",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -855,6 +871,76 @@ document.getElementById("refund-fbc").addEventListener("click", async () => {
 
 // ---- Detail card renderer (DOM-safe, no innerHTML) ----
 // Matches the .detail-card / .detail-row pattern used by web/ and docs/.
+
+// Render a tx broadcast status line: full txid in mono + copy + explorer
+// link. No truncation. If you truncate a hash in a status line your users
+// will spend twenty minutes figuring out how to see the rest of it —
+// don't do it.
+function renderTxStatus(statusEl, opts) {
+  const { label, txid, chain, followup } = opts;
+  statusEl.replaceChildren();
+  statusEl.classList.remove("error");
+  statusEl.classList.add("ok");
+
+  const labelSpan = document.createElement("span");
+  labelSpan.textContent = label + " ";
+  statusEl.appendChild(labelSpan);
+
+  const mono = document.createElement("code");
+  mono.textContent = txid;
+  mono.style.cssText = "word-break:break-all;user-select:all;";
+  statusEl.appendChild(mono);
+
+  statusEl.appendChild(document.createTextNode(" "));
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "btn";
+  copyBtn.style.cssText = "height:22px;padding:0 8px;font-size:11px;vertical-align:middle;";
+  copyBtn.textContent = "Copy";
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(txid);
+    copyBtn.textContent = "Copied";
+    setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+  });
+  statusEl.appendChild(copyBtn);
+
+  statusEl.appendChild(document.createTextNode(" "));
+
+  const explorer = document.createElement("a");
+  explorer.target = "_blank";
+  explorer.rel = "noreferrer";
+  explorer.textContent = "Open in explorer";
+  explorer.style.cssText = "font-size:12px;";
+  if (chain === "btc") {
+    const base =
+      BTC_NETWORK === "testnet"
+        ? "https://mempool.space/testnet/tx/"
+        : BTC_NETWORK === "main"
+          ? "https://mempool.space/tx/"
+          : null;
+    if (base) explorer.href = base + txid;
+    else explorer.textContent = "";
+  } else if (chain === "fbc") {
+    const base =
+      FBC_NETWORK === "main"
+        ? "https://explorer.fistbump.org/tx/"
+        : FBC_NETWORK === "testnet"
+          ? "https://explorer.testnet.fistbump.org/tx/"
+          : null;
+    if (base) explorer.href = base + txid;
+    else explorer.textContent = "";
+  }
+  if (explorer.href) statusEl.appendChild(explorer);
+
+  if (followup) {
+    statusEl.appendChild(document.createElement("br"));
+    const f = document.createElement("span");
+    f.textContent = followup;
+    f.style.cssText = "color:var(--fb-text-muted);";
+    statusEl.appendChild(f);
+  }
+}
 
 function renderSummary(container, rows) {
   container.replaceChildren();
