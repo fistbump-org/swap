@@ -1,6 +1,6 @@
 # FBC ↔ BTC Atomic Swap Protocol v1
 
-**Status:** Draft
+**Status:** Live (first mainnet swap 2026-04-15)
 **Scope:** Trustless, non-custodial atomic swaps between the Fistbump (FBC) and Bitcoin (BTC) blockchains using hash time-locked contracts (HTLCs).
 
 This document specifies the on-chain scripts, off-chain message formats, timelock parameters, and failure-path handling for a peer-to-peer swap protocol. It is the authoritative source for the reference CLI, the `window.fistbump` wallet extension, the `swap/web/core` browser library, and any third-party implementation.
@@ -382,27 +382,25 @@ These may be future versions; they are deliberately excluded here to keep the fi
 
 ---
 
-## 11. Test vectors
+## 11. Implementation notes
 
-The reference implementation (`swap/cli`) ships with deterministic test vectors covering:
+Lessons from the first mainnet swap (2026-04-15):
 
-1. Script construction — known `h`, `A_btc`, `B_btc`, `T1` → expected script bytes and P2WSH commitment.
-2. FBC script construction — analogous, with SHA3-256 commitment.
-3. Offer blob — known inputs → expected base64url-encoded envelope.
-4. Claim witness — known `s`, signature → expected witness stack bytes.
-5. Refund witness — known signature, nLockTime → expected witness stack bytes.
-6. Regtest round-trip — two wallets, both chains in regtest, full happy-path swap.
-7. Regtest refund — happy-path funding, no claim, verify refund after timelock.
-
-Vectors are stored in `swap/SPEC-vectors.json` and consumed by the CLI's `swap test-vectors` subcommand.
+1. **`@scure/btc-signer`** requires `allowUnknownInputs: true` on the Transaction constructor for HTLC scripts. Its `finalize()` overwrites manually-set `finalScriptWitness` for unknown input types — skip `finalize()` and call `extract()` directly after setting the witness.
+2. **Unisat** (BTC browser extension) refuses to sign P2WSH inputs with custom scripts ("Unknown inputs not allowed"). The frontend ships an in-browser WIF-signing fallback via `@scure/btc-signer`'s `signIdx`.
+3. **BTC claim fee floor** of 3 sat/vB is enforced. Below 1 sat/vB, Bitcoin Core nodes refuse to relay and the claim can stall indefinitely. Claims also signal BIP 125 RBF (`nSequence = 0xFFFFFFFD`) so fees can be bumped if needed.
+4. **BTC funding vout** must be detected from on-chain data, not assumed to be 0. Wallet coin-selection output ordering is not guaranteed.
+5. **FBC claim broadcast** must be chained with signing. The wallet extension's `signHtlcSpend` signs AND broadcasts atomically; if broadcast fails, the signed tx hex is returned so the caller can retry.
+6. **Bob MUST validate `T2 > T1`** before funding. Without this, Alice can claim FBC and then refund her BTC, taking both sides. Enforced in both the core library and the frontend.
+7. **Blockstream Esplora** (`blockstream.info/api`) is used for BTC tip height, fee estimates, and broadcast. Explorer links use 3xpl.com.
 
 ---
 
 ## 12. Reference implementations
 
-- **Swift CLI** — `swap/cli`. Authoritative. Uses `fbd` libraries directly for FBC, `libbitcoin` (or equivalent Swift BTC library) for BTC.
-- **Browser library** — `swap/web/core`. TypeScript, runs in any modern browser. Uses the Fistbump wallet extension (`window.fistbump`) for FBC signing and a BIP-174-compatible BTC wallet (Unisat, Xverse, OKX Wallet) for BTC signing. Never sees private keys.
-- **Frontend** — `swap/web/app`. Static HTML+JS. Hosted at `swap.fistbump.org`. Pure client-side; server ships only static files.
+- **Browser library** — `web/core`. TypeScript, runs in any modern browser. Uses the Fistbump wallet extension (`window.fistbump`) for FBC signing and a WIF-based in-browser signer (or BIP-174-compatible BTC wallet) for BTC signing.
+- **Frontend** — `web/app`. Static HTML+JS. Hosted at `swap.fistbump.org`. Pure client-side; server ships only static files.
+- **Swift (fbd)** — `Script.htlc` + `WalletHTLC` + RPC handlers in the [fbd](https://github.com/fistbump-org/fbd) repository. Authoritative script construction and FBC-side signing.
 
 The Fistbump wallet extension gains three new methods to drive the FBC leg: `getPublicKey`, `fundHtlc`, and `signHtlcSpend`. See the wallet repository for the page-facing API contract.
 
