@@ -180,7 +180,7 @@
           <h2 class="step-title">Paste their accept back here</h2>
         </div>
         <div class="step-body">
-          <textarea id="accept-blob-in" rows="3" class="blob" placeholder="fistbump-swap:v1:…"></textarea>
+          <textarea id="accept-blob-in" rows="3" class="blob" placeholder="Paste the blob from your counterparty"></textarea>
           <button id="process-accept" class="btn primary" disabled>Verify and continue</button>
           <p class="field-note" id="accept-status"></p>
         </div>
@@ -198,7 +198,7 @@
             or <em>you after the refund height</em>. No one else can touch it.
           </p>
           <div class="detail-card" id="btc-fund-summary"></div>
-          <button id="fund-btc" class="btn primary" disabled>Sign and broadcast</button>
+          <button id="fund-btc" class="btn primary" disabled>Fund BTC HTLC</button>
           <p class="field-note" id="btc-fund-status"></p>
         </div>
       </li>
@@ -215,7 +215,7 @@
             is what lets the counterparty unlock the BTC you posted — that's
             the atomic part.
           </p>
-          <textarea id="funded-fbc-in" rows="3" class="blob" placeholder="Paste their funded_fbc blob"></textarea>
+          <textarea id="funded-fbc-in" rows="3" class="blob" placeholder="Paste the funded_fbc blob from your counterparty"></textarea>
           <button id="claim-fbc" class="btn primary" disabled>Claim my FBC</button>
           <p class="field-note" id="claim-status"></p>
         </div>
@@ -274,7 +274,7 @@
           <h2 class="step-title">Paste the offer they sent you</h2>
         </div>
         <div class="step-body">
-          <textarea id="offer-blob-in" rows="3" class="blob" placeholder="fistbump-swap:v1:…"></textarea>
+          <textarea id="offer-blob-in" rows="3" class="blob" placeholder="Paste the blob from your counterparty"></textarea>
           <button id="process-offer" class="btn primary" disabled>Check the offer</button>
           <div class="detail-card hidden" id="offer-summary"></div>
         </div>
@@ -309,8 +309,8 @@
             wasted time — but if you fund first and they never do, your FBC is
             stuck until the timelock.
           </p>
-          <textarea id="funded-btc-in" rows="3" class="blob" placeholder="Paste their funded_btc blob"></textarea>
-          <button id="fund-fbc" class="btn primary" disabled>Sign and broadcast FBC</button>
+          <textarea id="funded-btc-in" rows="3" class="blob" placeholder="Paste the funded_btc blob from your counterparty"></textarea>
+          <button id="fund-fbc" class="btn primary" disabled>Fund FBC HTLC</button>
           <p class="field-note" id="fbc-fund-status"></p>
         </div>
       </li>
@@ -331,9 +331,7 @@
           </p>
           <label class="field-label" for="preimage-in">Preimage (64 hex chars)</label>
           <input id="preimage-in" class="blob" placeholder="Paste the 64-character hex preimage from Alice" />
-          <div style="margin-top:var(--fb-space-md);">
-            <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
-          </div>
+          <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
           <p class="field-note" id="claim-btc-status"></p>
 
           <details class="reveal-details">
