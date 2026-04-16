@@ -116,7 +116,12 @@ export function buildHTLCSpendPsbt(params: {
       script: p2wsh.script,
     },
     witnessScript,
-    sequence: branch === "refund" ? 0xffff_fffe : 0xffff_ffff,
+    // Always 0xFFFFFFFD: below 0xFFFFFFFE so BIP 125 RBF is signalled
+    // (fee-bumpable if the tx stalls in mempool) and also below
+    // 0xFFFFFFFF so OP_CHECKLOCKTIMEVERIFY evaluates against nLockTime.
+    // Works for both claim (where we don't care about CLTV evaluation,
+    // that branch isn't taken) and refund (where we need it).
+    sequence: 0xffff_fffd,
     sighashType: btc.SigHash.ALL,
   });
   tx.addOutputAddress(destination, sendValue, net);

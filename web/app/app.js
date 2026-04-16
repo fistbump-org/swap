@@ -212,8 +212,15 @@ async function fetchBtcTipHeight() {
 
 async function fetchBtcFeeRate() {
   // mempool.space recommended fee rate in sat/vB. Falls back to 20 if
-  // the service is unreachable — conservative for mainnet, wasteful for
-  // testnet but claim/refund timing matters more than fee efficiency.
+  // the service is unreachable.
+  //
+  // Floor at 3 sat/vB: HTLC claim/refund txs are time-sensitive — if the
+  // claim doesn't confirm before T1, the counterparty can refund and the
+  // claimer loses their funds. mempool.space's halfHourFee can dip to
+  // 1 sat/vB during quiet periods, which is below Bitcoin Core's default
+  // relay minimum and may never confirm. The floor is an HTLC-specific
+  // safety margin, not a reflection of network conditions.
+  const FLOOR = 3;
   try {
     const base =
       BTC_NETWORK === "testnet"
@@ -225,10 +232,9 @@ async function fetchBtcFeeRate() {
     const res = await fetch(`${base}/v1/fees/recommended`);
     if (!res.ok) throw new Error(String(res.status));
     const j = await res.json();
-    // Use halfHourFee so we clear within ~3 blocks; claim txs are
-    // time-sensitive, refund txs are not, but the same default is fine.
     const rate = Number(j.halfHourFee);
-    return rate > 0 && isFinite(rate) ? rate : 20;
+    const chosen = rate > 0 && isFinite(rate) ? rate : 20;
+    return Math.max(chosen, FLOOR);
   } catch {
     return 20;
   }
