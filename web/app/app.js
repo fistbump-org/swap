@@ -483,8 +483,39 @@ document.getElementById("claim-fbc").addEventListener("click", async () => {
       label: "FBC claim broadcast.",
       txid: res.txid,
       chain: "fbc",
-      followup: "Counterparty can now claim their BTC using the preimage revealed on this tx.",
+      followup: "Counterparty can now claim their BTC using the preimage below.",
     });
+    // The preimage has just been revealed on-chain, so sharing it isn't a
+    // security change — but the counterparty needs to get their hands on
+    // it to claim BTC, and the explorer doesn't render witness data. Show
+    // it here so Alice can copy + paste to Bob directly (fastest path) or
+    // Bob can look it up from the tx himself.
+    const preimagePanel = document.createElement("div");
+    preimagePanel.style.cssText =
+      "margin-top:12px;padding:12px;background:var(--fb-bg-raised);border:1px solid var(--fb-border);border-radius:var(--fb-radius);";
+    const label = document.createElement("div");
+    label.textContent = "Preimage — send this to your counterparty:";
+    label.style.cssText =
+      "font-size:var(--fb-text-xs);color:var(--fb-text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;";
+    preimagePanel.appendChild(label);
+    const preimageHex = toHex(alice.preimage);
+    const mono = document.createElement("code");
+    mono.textContent = preimageHex;
+    mono.style.cssText = "word-break:break-all;user-select:all;font-size:var(--fb-text-sm);";
+    preimagePanel.appendChild(mono);
+    preimagePanel.appendChild(document.createElement("br"));
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn";
+    copyBtn.style.cssText = "margin-top:8px;height:26px;padding:0 10px;font-size:12px;";
+    copyBtn.textContent = "Copy preimage";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(preimageHex);
+      copyBtn.textContent = "Copied";
+      setTimeout(() => (copyBtn.textContent = "Copy preimage"), 1200);
+    });
+    preimagePanel.appendChild(copyBtn);
+    statusEl.appendChild(preimagePanel);
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -975,6 +1006,51 @@ function renderSummary(container, rows) {
 
 updateAliceBuildOfferEnabled();
 updateBobButtons();
+
+// ---- Blob-type hints ----
+//
+// Attach a live "Detected: <kind> for offer <prefix>" hint under every
+// paste field. Pasting the wrong kind of blob into the wrong box is easy
+// and the error messages that follow are opaque; this gives immediate
+// feedback while typing/pasting.
+function wireBlobHint(inputId, expectedKind) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  const hint = document.createElement("div");
+  hint.className = "field-note";
+  hint.style.cssText = "margin:4px 0 8px;font-family:var(--fb-font-mono);font-size:var(--fb-text-xs);";
+  el.insertAdjacentElement("afterend", hint);
+  el.addEventListener("input", () => {
+    const val = el.value.trim();
+    if (!val) {
+      hint.textContent = "";
+      hint.classList.remove("ok", "error");
+      return;
+    }
+    try {
+      const blob = decodeBlob(val);
+      const idFrag = blob.offer_id ? ` for offer ${blob.offer_id.slice(0, 8)}…` : "";
+      if (blob.kind === expectedKind) {
+        hint.textContent = `Detected: ${blob.kind}${idFrag} ✓`;
+        hint.classList.add("ok");
+        hint.classList.remove("error");
+      } else {
+        hint.textContent =
+          `Detected: ${blob.kind}${idFrag} — but this field expects a ${expectedKind} blob.`;
+        hint.classList.add("error");
+        hint.classList.remove("ok");
+      }
+    } catch {
+      hint.textContent = "Not a recognisable fistbump-swap envelope.";
+      hint.classList.add("error");
+      hint.classList.remove("ok");
+    }
+  });
+}
+wireBlobHint("accept-blob-in", "accept");
+wireBlobHint("funded-fbc-in", "funded_fbc");
+wireBlobHint("offer-blob-in", "offer");
+wireBlobHint("funded-btc-in", "funded_btc");
 
 // ---- Dev resume ----
 //
