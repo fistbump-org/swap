@@ -128,6 +128,12 @@ body.nav-open { overflow: hidden; }
   max-width: 580px; margin: 0 auto 40px;
   line-height: 1.7;
 }
+.hero-req {
+  font-size: var(--fb-text-sm);
+  color: var(--fb-text-dim);
+  margin: -24px auto 32px;
+}
+.hero-req a { color: var(--fb-accent); }
 
 /* ── Role switch (tab-style segmented control, glass) ── */
 .role-switch {
