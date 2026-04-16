@@ -71,7 +71,7 @@
     <p class="hero-badge">Atomic swaps · non-custodial</p>
     <h1 class="hero-title">Swap BTC and FBC,<br>peer to peer</h1>
     <p class="hero-sub">
-      Two people, two wallets, two blockchains, one preimage. No custody, no
+      Two people, two wallets, two blockchains, one <abbr title="A 32-byte secret that only Alice knows at the start. Revealing it on one chain makes it public on both — which is what makes the swap atomic.">preimage</abbr>. No custody, no
       middleman, no fees — just the scripts each chain already understands.
     </p>
     <p class="hero-req">Requires <a href="https://fistbump.org/#software">wallet</a> v0.2.2+ and <a href="https://fistbump.org/#software">extension</a> v0.2.0+.</p>
@@ -164,8 +164,8 @@
         <div class="step-body">
           <p class="step-hint">
             Copy this line to your counterparty — Signal, email, whatever you
-            use. It is just public data: hashlock, your pubkeys, amounts, and
-            the two refund heights.
+            use. It is just public data: <abbr title="SHA-256 of the preimage. Shared openly; only the preimage itself is secret.">hashlock</abbr>, your pubkeys, amounts, and
+            the two <abbr title="Absolute block heights. Until these blocks are reached, only the counterparty with the preimage can spend. After, you can reclaim your funds.">refund heights</abbr>.
           </p>
           <div class="blob-panel">
             <textarea id="offer-blob" readonly rows="5" class="blob" placeholder="Your offer blob will appear here…"></textarea>
@@ -198,7 +198,7 @@
         <div class="step-body">
           <p class="step-hint">
             Your wallet will build a standard segwit transaction that locks the
-            BTC into a script that only resolves to <em>them with your preimage</em>
+            BTC into an <abbr title="Hash Time-Locked Contract: a script that resolves either to the recipient who reveals the preimage, or back to the sender after a timelock deadline.">HTLC</abbr> that only resolves to <em>them with your preimage</em>
             or <em>you after the refund height</em>. No one else can touch it.
           </p>
           <div class="detail-card" id="btc-fund-summary"></div>
@@ -215,7 +215,7 @@
         <div class="step-body">
           <p class="step-hint">
             Once the counterparty funds the FBC side, your wallet will claim it
-            by broadcasting a transaction that reveals your preimage. The reveal
+            by broadcasting a transaction that reveals your <abbr title="The 32-byte secret you generated in Step 2. Revealing it on FBC makes it public — the counterparty uses that same value to claim your BTC.">preimage</abbr>. The reveal
             is what lets the counterparty unlock the BTC you posted — that's
             the atomic part.
           </p>
@@ -294,7 +294,7 @@
         <div class="step-body">
           <p class="step-hint">
             Your accept just contains your two pubkeys — that's everything the
-            counterparty needs to reconstruct the scripts independently.
+            counterparty needs to reconstruct the <abbr title="The HTLC script. Both parties build it independently from the same parameters; if they don't match byte-for-byte, one party will detect the mismatch before funding.">scripts</abbr> independently.
           </p>
           <div class="blob-panel">
             <textarea id="accept-blob" readonly rows="3" class="blob" placeholder="Your accept will appear here…"></textarea>
@@ -310,10 +310,10 @@
         </div>
         <div class="step-body">
           <p class="step-hint">
-            Never fund FBC before you've verified their BTC HTLC has confirmed
+            Never fund FBC before you've verified their BTC <abbr title="Hash Time-Locked Contract: the script that locks the BTC until either the recipient reveals the preimage or the timelock expires.">HTLC</abbr> has confirmed
             to at least 6 blocks. If they haven't funded, the worst case is you've
             wasted time — but if you fund first and they never do, your FBC is
-            stuck until the timelock.
+            stuck until the <abbr title="The absolute block height after which you can reclaim your funds via the refund branch.">timelock</abbr>.
           </p>
           <textarea id="funded-btc-in" rows="3" class="blob" placeholder="Paste the funded_btc blob from your counterparty"></textarea>
           <button id="fund-fbc" class="btn primary" disabled>Fund FBC HTLC</button>
@@ -328,8 +328,8 @@
         </div>
         <div class="step-body">
           <p class="step-hint">
-            After the counterparty claims their FBC, the preimage is public in
-            that claim transaction's witness. Paste the preimage below (your
+            After the counterparty claims their FBC, the <abbr title="The 32-byte secret. Once revealed on one chain, it's publicly readable — that's what makes the swap atomic.">preimage</abbr> is public in
+            that claim transaction's <abbr title="The data attached to a segwit spend that satisfies the script: signatures, the preimage, and the script itself.">witness</abbr>. Paste the preimage below (your
             counterparty can share it, or you can read it off the FBC
             explorer). Your wallet will then spend the BTC HTLC into your
             Bitcoin address. <strong>Do this well before the BTC refund
@@ -428,7 +428,7 @@
         <div class="how-step">D</div>
         <h3>Or a refund</h3>
         <p>
-          If anything goes wrong, the refund paths take over after the timelocks.
+          If anything goes wrong, the refund paths take over after the <abbr title="Absolute block-height deadlines baked into each HTLC script. Before the deadline, only the recipient-with-preimage can spend; after, only the funder can reclaim.">timelocks</abbr>.
           No one can be cheated out of their coins — worst case, you wait and get
           your money back.
         </p>

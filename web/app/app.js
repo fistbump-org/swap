@@ -30,6 +30,7 @@ import {
   buildHTLCSpendPsbt,
   finalizeHTLCSpend,
   signAndFinalizeWithWIF,
+  blobQrDataUrl,
 } from "./core/bundle.js";
 
 import { loadState, patchState, clearState, hasState } from "./state.js";
@@ -38,6 +39,7 @@ import {
   pollFbcConfirmations,
   pollBtcTip,
   pollFbcTip,
+  pollFbcPreimageReveal,
   estimateWallClock,
 } from "./chain.js";
 
@@ -70,6 +72,43 @@ function setFieldNote(el, message, kind) {
   el.textContent = message || "";
   el.classList.remove("ok", "warn", "error");
   if (kind) el.classList.add(kind);
+}
+
+// Background browser notifications. Fired when a poller flips a state the
+// user was waiting on — they may have gone to do something else while a
+// BTC tx accrues confirmations, and we'd rather tap them on the shoulder
+// than expect them to watch the tab.
+//
+// Permission is requested lazily: the first call with a not-yet-decided
+// prompt kicks off Notification.requestPermission(). Subsequent calls
+// honour whatever the user chose. We never spam: `notifyOnce(key, …)`
+// guarantees a given event fires at most once per page load.
+const NOTIFIED_KEYS = new Set();
+
+async function maybeRequestNotificationPermission() {
+  if (!("Notification" in window)) return "denied";
+  if (Notification.permission !== "default") return Notification.permission;
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return "denied";
+  }
+}
+
+function notify(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    new Notification(title, { body, icon: "./favicon-96x96.png" });
+  } catch (err) {
+    console.warn("notify failed:", err);
+  }
+}
+
+function notifyOnce(key, title, body) {
+  if (NOTIFIED_KEYS.has(key)) return;
+  NOTIFIED_KEYS.add(key);
+  notify(title, body);
 }
 
 // Modal-based replacement for the native `confirm()` prompt. Returns a
@@ -507,6 +546,19 @@ buildOfferBtn.addEventListener("click", async () => {
     document.getElementById("offer-json").textContent = JSON.stringify(offer, null, 2);
     document.getElementById("process-accept").disabled = false;
 
+    wireShareButtons(
+      document.getElementById("offer-blob").closest(".blob-panel"),
+      () => envelope,
+      { label: "Offer link" },
+    );
+
+    // Cue the user that the ball is in the counterparty's court.
+    renderWaitingPanel(
+      document.getElementById("offer-blob").closest(".step-body"),
+      "Your counterparty's turn:",
+      "they paste this offer into the \"I have FBC\" flow at Step 2, then send you back an accept blob (paste it at Step 4 below).",
+    );
+
     // Checkpoint — if Alice closes the tab here, the preimage and offer
     // can be recovered on next load. Without this the preimage is ONLY
     // in memory, and losing it means forfeiting the claim (must refund).
@@ -625,12 +677,18 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
       followup: "funded_btc blob copied to your clipboard — send it to your counterparty.",
     });
     showToast("funded_btc blob copied to clipboard", "ok");
+    appendShareBlock(statusEl, fundedBlob, "funded_btc");
     document.getElementById("claim-fbc").disabled = false;
 
     // Live "N/6 confirmations" under the fund status so Alice can tell
     // her counterparty when BTC is safe to act on, without leaving the
     // tab for an explorer.
     startBtcConfWatch(statusEl, txid, BTC_CONF_TARGET);
+    renderWaitingPanel(
+      statusEl.closest(".step-body"),
+      "Your counterparty's turn:",
+      "once your BTC has 6 confirmations, they fund the FBC side. Then paste their funded_fbc blob at Step 6 below.",
+    );
     // Start the refund countdown. The button stays disabled until the
     // BTC tip reaches T1; the countdown provides the context so the user
     // knows how long until recovery becomes available.
@@ -758,6 +816,11 @@ document.getElementById("claim-fbc").addEventListener("click", async () => {
     // reload banner can re-display the hand-off panel until Alice dismisses.
     patchState("alice", { step: "fbc-claimed" });
     renderPreimagePanel(statusEl, toHex(alice.preimage));
+    renderWaitingPanel(
+      statusEl.closest(".step-body"),
+      "Your counterparty's turn:",
+      "they use the preimage above (or read it off your FBC claim tx) to claim their BTC. Swap completes when that lands on-chain.",
+    );
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -836,9 +899,22 @@ document.getElementById("process-offer").addEventListener("click", async () => {
       bob_fbc_pubkey: bob.fbc.pubkey,
     };
     bob.accept = accept;
-    document.getElementById("accept-blob").value = encodeBlob(accept);
+    const acceptEnvelope = encodeBlob(accept);
+    document.getElementById("accept-blob").value = acceptEnvelope;
     document.getElementById("fund-fbc").disabled = false;
     setFieldNote(statusEl, "Offer verified. Send your accept below.", "ok");
+
+    wireShareButtons(
+      document.getElementById("accept-blob").closest(".blob-panel"),
+      () => acceptEnvelope,
+      { label: "Accept link" },
+    );
+
+    renderWaitingPanel(
+      document.getElementById("accept-blob").closest(".step-body"),
+      "Your counterparty's turn:",
+      "they paste your accept, fund their BTC HTLC, and send you a funded_btc blob. Paste it at Step 4 below.",
+    );
 
     patchState("bob", {
       offer,
@@ -916,10 +992,21 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       followup: "funded_fbc blob copied to your clipboard — send it to your counterparty.",
     });
     showToast("funded_fbc blob copied to clipboard", "ok");
+    appendShareBlock(statusEl, fundedFbcBlob, "funded_fbc");
 
-    document.getElementById("claim-btc").disabled = false;
+    // claim-btc stays disabled until either (a) user pastes preimage
+    // manually, or (b) the auto-extract poller finds Alice's claim on-chain
+    // and fills the field. This prevents accidental clicks with an empty
+    // preimage, and makes the transition obvious.
+    document.getElementById("claim-btc").disabled = true;
 
     startBobFbcRefundCountdown();
+    startPreimageAutoExtract();
+    renderWaitingPanel(
+      statusEl.closest(".step-body"),
+      "Your counterparty's turn:",
+      "they wait for 12 FBC confirmations, then claim — which reveals the preimage on-chain. You use that preimage to claim BTC at Step 5 below.",
+    );
 
     patchState("bob", {
       btcFunded: funded,
@@ -1196,6 +1283,120 @@ document.getElementById("refund-fbc").addEventListener("click", async () => {
   }
 });
 
+// ---- Blob sharing helpers (QR + deep link) ----
+//
+// The copy-paste dance is the highest-friction step of the flow. These
+// helpers offer two shortcuts the counterparty can follow to pre-populate
+// their side:
+//
+//   - Link: `https://swap.fistbump.org/#b=<envelope>` opens the page with
+//     the right role auto-selected and the paste field pre-filled.
+//   - QR code: same link, rendered for phone-camera capture so two people
+//     side by side don't have to paste at all.
+//
+// The envelope itself (`fistbump-swap:v1:...base64url...`) is URL-safe,
+// so we don't need to re-encode it to put it in the hash.
+
+function buildShareLink(envelope) {
+  // location.origin + pathname strips any existing query/hash; the
+  // resulting URL loads the page fresh with our blob in #b=.
+  return `${location.origin}${location.pathname}#b=${envelope}`;
+}
+
+// Append a compact "Share link / Show QR" block after a tx-status line so
+// the just-broadcast funded_* envelope can be sent via link or QR without
+// the user remembering which tab has the clipboard contents.
+function appendShareBlock(statusEl, envelope, kind) {
+  if (!statusEl || !envelope) return;
+  statusEl.querySelector(".share-buttons")?.remove();
+  statusEl.querySelector(".qr-wrap")?.remove();
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin-top:10px;";
+  statusEl.appendChild(wrap);
+  wireShareButtons(wrap, () => envelope, { label: `${kind} link` });
+}
+
+// Attach a "Show QR" + "Copy link" button pair to an existing blob panel.
+// Idempotent: calling twice replaces the prior buttons.
+function wireShareButtons(panelEl, getEnvelope, opts = {}) {
+  if (!panelEl) return;
+  panelEl.querySelector(".share-buttons")?.remove();
+  panelEl.querySelector(".qr-wrap")?.remove();
+
+  const row = document.createElement("div");
+  row.className = "share-buttons";
+  row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;";
+
+  const linkBtn = document.createElement("button");
+  linkBtn.type = "button";
+  linkBtn.className = "btn";
+  linkBtn.textContent = "Copy link";
+  linkBtn.addEventListener("click", () => {
+    const env = getEnvelope();
+    if (!env) return;
+    navigator.clipboard.writeText(buildShareLink(env));
+    showToast(`${opts.label || "Link"} copied — they can paste it straight into their browser`, "ok");
+  });
+  row.appendChild(linkBtn);
+
+  const qrBtn = document.createElement("button");
+  qrBtn.type = "button";
+  qrBtn.className = "btn";
+  qrBtn.textContent = "Show QR";
+  qrBtn.addEventListener("click", async () => {
+    const existing = panelEl.querySelector(".qr-wrap");
+    if (existing) { existing.remove(); qrBtn.textContent = "Show QR"; return; }
+    const env = getEnvelope();
+    if (!env) return;
+    qrBtn.textContent = "…";
+    const url = await blobQrDataUrl(buildShareLink(env));
+    qrBtn.textContent = "Hide QR";
+    if (!url) { showToast("QR generation failed", "error"); return; }
+    const wrap = document.createElement("div");
+    wrap.className = "qr-wrap";
+    const qp = document.createElement("div");
+    qp.className = "qr-panel";
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "QR code encoding the swap blob link";
+    qp.appendChild(img);
+    wrap.appendChild(qp);
+    const cap = document.createElement("div");
+    cap.className = "caption";
+    cap.textContent = "Counterparty scans → opens the flow with this blob pre-filled.";
+    wrap.appendChild(cap);
+    panelEl.appendChild(wrap);
+  });
+  row.appendChild(qrBtn);
+
+  panelEl.appendChild(row);
+}
+
+// Render a subtle "waiting on counterparty" panel inside `container`.
+// If one already exists in the container it's replaced, so calling this
+// multiple times advances the displayed message instead of stacking.
+// `content` is a string of text (body of the panel); `strong` is optionally
+// a bold lead-in (first phrase of the message).
+function renderWaitingPanel(container, strong, content) {
+  if (!container) return;
+  container.querySelector(".waiting-panel")?.remove();
+  const panel = document.createElement("div");
+  panel.className = "waiting-panel";
+  const body = document.createElement("span");
+  if (strong) {
+    const s = document.createElement("strong");
+    s.textContent = strong + " ";
+    body.appendChild(s);
+  }
+  body.appendChild(document.createTextNode(content));
+  panel.appendChild(body);
+  container.appendChild(panel);
+}
+
+function clearWaitingPanel(container) {
+  container?.querySelector(".waiting-panel")?.remove();
+}
+
 // Render a "Preimage — send this to your counterparty" panel. Factored so
 // the post-claim moment AND the persistence-restore banner can both use it.
 // The preimage is already on-chain by the time this renders, so displaying
@@ -1380,7 +1581,17 @@ function renderConfLine(container, label, state, target) {
 }
 
 function startBtcConfWatch(container, txid, target) {
-  const stop = pollBtcConfirmations(txid, (state) => renderConfLine(container, "BTC funding", state, target));
+  maybeRequestNotificationPermission();
+  const stop = pollBtcConfirmations(txid, (state) => {
+    const ready = renderConfLine(container, "BTC funding", state, target);
+    if (ready) {
+      notifyOnce(
+        `btc-conf-${txid}`,
+        "BTC funding confirmed",
+        `${state.confirmations}/${target} confirmations — it's safe to act on this swap.`,
+      );
+    }
+  });
   activePolls.push(stop);
   return stop;
 }
@@ -1423,7 +1634,17 @@ async function checkBtcConfirmations(txid) {
 }
 
 function startFbcConfWatch(container, txid, target) {
-  const stop = pollFbcConfirmations(txid, (state) => renderConfLine(container, "FBC funding", state, target));
+  maybeRequestNotificationPermission();
+  const stop = pollFbcConfirmations(txid, (state) => {
+    const ready = renderConfLine(container, "FBC funding", state, target);
+    if (ready) {
+      notifyOnce(
+        `fbc-conf-${txid}`,
+        "FBC funding confirmed",
+        `${state.confirmations}/${target} confirmations — it's safe to claim.`,
+      );
+    }
+  });
   activePolls.push(stop);
   return stop;
 }
@@ -1446,6 +1667,13 @@ function wireRefundCountdown({ buttonId, noteId, chain, getHeight }) {
     if (!Number.isFinite(target)) return;
     const remaining = target - tip;
     if (remaining <= 0) {
+      if (!ready) {
+        notifyOnce(
+          `refund-ready-${chain}-${target}`,
+          `${chain.toUpperCase()} refund window open`,
+          `Tip reached block ${target}. You can broadcast your refund now if the swap didn't complete.`,
+        );
+      }
       ready = true;
       button.disabled = false;
       setFieldNote(note, `Refund available now (tip ${tip} ≥ ${target}).`, "ok");
@@ -1476,6 +1704,49 @@ function startBobFbcRefundCountdown() {
     chain: "fbc",
     getHeight: () => bob.offer?.fbc_refund_height,
   });
+}
+
+/**
+ * Start watching for Alice's on-chain FBC claim. When detected, extract
+ * the preimage from the witness stack, auto-fill Bob's preimage input,
+ * and fire a toast + browser notification. Removes the manual out-of-band
+ * hand-off entirely in the common case.
+ *
+ * Safe to call multiple times — the poller deduplicates on fundingTxid.
+ */
+const activePreimageWatches = new Set();
+function startPreimageAutoExtract() {
+  if (!bob.fbcFundedTxid || !bob.fbcScript) return;
+  const key = `${bob.fbcFundedTxid}:${bob.fbcFundedVout}`;
+  if (activePreimageWatches.has(key)) return;
+  activePreimageWatches.add(key);
+
+  const addr = fbcHTLCAddress(bob.fbcScript, FBC_NETWORK);
+  maybeRequestNotificationPermission();
+  const preimageInput = document.getElementById("preimage-in");
+  const stop = pollFbcPreimageReveal(
+    bob.fbcFundedTxid,
+    bob.fbcFundedVout,
+    addr,
+    ({ preimageHex, spendingTxid }) => {
+      activePreimageWatches.delete(key);
+      if (!preimageInput) return;
+      // Only overwrite if the user hasn't already entered the preimage
+      // themselves (they may have copied it off the explorer first).
+      if (!preimageInput.value.trim()) {
+        preimageInput.value = preimageHex;
+        preimageInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      document.getElementById("claim-btc").disabled = false;
+      showToast("Preimage detected on-chain — you can claim BTC now", "ok");
+      notifyOnce(
+        `preimage-${bob.fbcFundedTxid}`,
+        "Preimage revealed",
+        `Your counterparty claimed FBC in tx ${spendingTxid.slice(0, 16)}…. Return to the tab to claim your BTC.`,
+      );
+    },
+  );
+  activePolls.push(stop);
 }
 
 // ---- Blob-type hints ----
@@ -1527,37 +1798,56 @@ wireBlobHint("funded-btc-in", "funded_btc");
 // 64 hex chars they pasted actually hash to the HTLC's committed hashlock.
 // Without this the only feedback was at click-time, and the most common
 // failure mode (pasting the txid instead of the preimage) burned a round
-// trip to discover.
+// trip to discover. The hint also gates the Claim button: only enable
+// claim-btc when the preimage in the field actually matches the HTLC,
+// so an accidental Enter after pasting a txid can't broadcast.
 (function wirePreimageHint() {
   const input = document.getElementById("preimage-in");
+  const claimBtn = document.getElementById("claim-btc");
   if (!input) return;
   const hint = document.createElement("div");
   hint.className = "field-note";
   hint.style.cssText = "margin:4px 0 var(--fb-space-md);font-family:var(--fb-font-mono);font-size:var(--fb-text-xs);";
   input.insertAdjacentElement("afterend", hint);
+  const gate = (valid) => {
+    if (!claimBtn) return;
+    // Only gate if Bob has already funded FBC — otherwise the button
+    // is disabled for a different reason (no funded state yet).
+    if (bob.fbcFundedTxid) claimBtn.disabled = !valid;
+  };
   input.addEventListener("input", () => {
     const val = input.value.trim().toLowerCase();
-    if (!val) { hint.replaceChildren(); hint.classList.remove("ok", "error"); return; }
+    if (!val) {
+      hint.replaceChildren();
+      hint.classList.remove("ok", "error");
+      gate(false);
+      return;
+    }
     if (!/^[0-9a-f]{64}$/.test(val)) {
       setFieldNote(hint, `Not 64 hex chars yet (${val.length}/64).`, "error");
+      gate(false);
       return;
     }
     if (!bob.btcFunded?.witness_script_hex) {
       setFieldNote(hint, "Valid 32-byte hex. Paste the funded_btc blob above to verify against the HTLC hashlock.", "ok");
+      gate(true);
       return;
     }
     try {
       const parsed = parseHTLCScript(fromHex(bob.btcFunded.witness_script_hex));
-      if (!parsed) { setFieldNote(hint, "Witness script is not a valid HTLC.", "error"); return; }
+      if (!parsed) { setFieldNote(hint, "Witness script is not a valid HTLC.", "error"); gate(false); return; }
       const computed = toHex(hashlockOf(fromHex(val)));
       const expected = toHex(parsed.hashlock);
       if (computed === expected) {
         setFieldNote(hint, `Preimage matches the HTLC hashlock ✓ (SHA-256 = ${expected.slice(0, 16)}…)`, "ok");
+        gate(true);
       } else {
         setFieldNote(hint, `Hash mismatch — SHA-256 = ${computed.slice(0, 16)}…, expected ${expected.slice(0, 16)}…`, "error");
+        gate(false);
       }
     } catch (err) {
       setFieldNote(hint, `Could not verify: ${err.message}`, "error");
+      gate(false);
     }
   });
 })();
@@ -1737,8 +2027,11 @@ function hydrate(role, data) {
     if (data.fbcFundedTxid) {
       bob.fbcFundedTxid = data.fbcFundedTxid;
       bob.fbcFundedVout = data.fbcFundedVout ?? 0;
-      document.getElementById("claim-btc").disabled = false;
+      // Stays disabled until a valid preimage lands in the input field
+      // (either manually or via auto-extract). See wirePreimageHint.
+      document.getElementById("claim-btc").disabled = true;
       startBobFbcRefundCountdown();
+      startPreimageAutoExtract();
     }
   }
 }
@@ -1766,6 +2059,44 @@ updateRolePill();
     const data = loadState(role);
     if (data) renderResumeBanner(role, data);
   }
+})();
+
+// ---- Deep link routing (#b=<envelope>) ----
+//
+// Counterparty shares `https://swap.fistbump.org/#b=fistbump-swap:v1:...`.
+// On page load, decode the envelope, pick the correct role and paste
+// field based on blob.kind, and dispatch an input event so the existing
+// blob-hint + confirmation-watch wiring picks it up. Doesn't auto-click
+// any buttons — the user still reviews and hits Verify/Fund themselves.
+(function routeDeepLink() {
+  const hash = location.hash || "";
+  const match = hash.match(/^#b=(.+)$/);
+  if (!match) return;
+  const envelope = decodeURIComponent(match[1]);
+  let blob;
+  try { blob = decodeBlob(envelope); }
+  catch (err) { showToast("Deep link: " + err.message, "error"); return; }
+
+  // kind → (role to select, input field to populate).
+  const ROUTES = {
+    offer:      { role: "bob",   fieldId: "offer-blob-in",  label: "offer" },
+    accept:     { role: "alice", fieldId: "accept-blob-in", label: "accept" },
+    funded_btc: { role: "bob",   fieldId: "funded-btc-in",  label: "funded_btc" },
+    funded_fbc: { role: "alice", fieldId: "funded-fbc-in",  label: "funded_fbc" },
+  };
+  const route = ROUTES[blob.kind];
+  if (!route) return;
+
+  selectRole(route.role);
+  const field = document.getElementById(route.fieldId);
+  if (!field) return;
+  field.value = envelope;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  field.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Clear the hash so a reload doesn't re-route and the user can share
+  // a plain link going forward.
+  history.replaceState(null, "", location.pathname);
+  showToast(`Loaded ${route.label} blob from link — review and continue`, "ok");
 })();
 
 // ---- Dev resume ----

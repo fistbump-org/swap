@@ -653,6 +653,71 @@ body.nav-open { overflow: hidden; }
   margin-bottom: 8px;
 }
 
+/* ── Inline jargon tooltips ── */
+/*
+ * Wrap domain terms in <abbr title="…"> so the definition appears in the
+ * native browser tooltip on hover + long-press (mobile). The subtle dotted
+ * underline signals "there's more here" without pulling attention from
+ * the main copy. `help` cursor reinforces the affordance.
+ */
+abbr[title] {
+  text-decoration: underline dotted var(--fb-accent-dim);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+abbr[title]:hover { text-decoration-color: var(--fb-accent); }
+
+/* ── Waiting-on-counterparty panel ── */
+.waiting-panel {
+  margin-top: var(--fb-space-base);
+  padding: 12px 14px;
+  background: rgba(87, 199, 237, 0.04);
+  border: 1px solid var(--fb-accent-dim);
+  border-radius: var(--fb-radius);
+  color: var(--fb-text-muted);
+  font-size: var(--fb-text-sm);
+  line-height: 1.6;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.waiting-panel::before {
+  content: "";
+  width: 8px; height: 8px;
+  background: var(--fb-accent);
+  border-radius: 50%;
+  margin-top: 7px;
+  flex-shrink: 0;
+  animation: waiting-pulse 1.6s ease-in-out infinite;
+}
+@keyframes waiting-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.7); }
+}
+.waiting-panel strong { color: var(--fb-text); font-weight: 600; }
+
+/* ── QR panel (reveal via button) ── */
+.qr-panel {
+  margin-top: 12px;
+  padding: 16px;
+  background: #fff;
+  border-radius: var(--fb-radius);
+  display: inline-block;
+  line-height: 0; /* prevent baseline gap under inline img */
+}
+.qr-panel img, .qr-panel canvas {
+  display: block;
+  width: 220px; height: 220px;
+}
+.qr-wrap {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px; margin-top: 8px;
+}
+.qr-wrap .caption {
+  font-size: var(--fb-text-xs);
+  color: var(--fb-text-dim);
+  font-family: var(--fb-font-mono);
+  letter-spacing: 0.03em;
+}
+
 /* ── Confirmation-progress line ── */
 .conf-line {
   display: flex; align-items: center; gap: 8px;
