@@ -330,8 +330,10 @@
             height — if the counterparty refunds first, your FBC is gone.</strong>
           </p>
           <label class="field-label" for="preimage-in">Preimage (64 hex chars)</label>
-          <input id="preimage-in" class="blob" placeholder="deadbeef..." />
-          <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
+          <input id="preimage-in" class="blob" placeholder="Paste the 64-character hex preimage from Alice" />
+          <div style="margin-top:var(--fb-space-md);">
+            <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
+          </div>
           <p class="field-note" id="claim-btc-status"></p>
 
           <details class="reveal-details">
