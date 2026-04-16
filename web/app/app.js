@@ -1023,7 +1023,7 @@ function wireBlobHint(inputId, expectedKind) {
   el.addEventListener("input", () => {
     const val = el.value.trim();
     if (!val) {
-      hint.textContent = "";
+      hint.replaceChildren();
       hint.classList.remove("ok", "error");
       return;
     }

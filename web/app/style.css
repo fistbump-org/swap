@@ -315,8 +315,8 @@ body.nav-open { overflow: hidden; }
   color: var(--fb-text-dim);
   margin: var(--fb-space-sm) 0 var(--fb-space-base);
   line-height: 1.6;
-  min-height: 1.2em;
 }
+.field-note:empty { display: none; }
 .field-note.ok { color: var(--fb-green); }
 .field-note.warn { color: var(--fb-yellow); }
 .field-note.error { color: var(--fb-red); }
