@@ -92,16 +92,14 @@ Apache/nginx on the host serves it behind a dedicated vhost for `swap.fistbump.o
 
 Before production deploy:
 
-1. Bundle `web/core`'s runtime dependencies (`@noble/hashes`, `@scure/base`) into a single self-hosted JS file so the site has no third-party CDN calls and the CSP can stay at `default-src 'self'`. A one-shot `esbuild` invocation accomplishes this.
-2. Replace the `importmap` entries in `index.html` with a local path to that bundle.
-3. Geo-block US-sanctioned jurisdictions in the UI as minimum hygiene (Iran, North Korea, Syria, Cuba, Crimea).
-4. Have counsel read `SPEC.md` Appendix C and sign off.
+1. ~~Bundle `web/core`'s runtime dependencies~~ — **done.** `./build.sh` now runs `esbuild` and emits `web/app/core/bundle.js` with `@noble/hashes`, `@scure/base`, and `@scure/btc-signer` inlined. The frontend imports the bundle directly; no `importmap`, no third-party CDN calls. The `<meta http-equiv="Content-Security-Policy">` in `index.html` is set to `default-src 'self'` with outbound connections allowlisted only to Blockstream and the Fistbump explorer.
+2. Geo-block US-sanctioned jurisdictions in the UI as minimum hygiene (Iran, North Korea, Syria, Cuba, Crimea).
+3. Have counsel read `SPEC.md` Appendix C and sign off.
 
 ## Known gaps (for future iteration)
 
-- **BTC claim/refund signing**: the frontend funds BTC HTLCs via `window.unisat.sendBitcoin(...)`, but claim and refund spending paths currently require wallet-level PSBT construction with custom witness data. Unisat's `signPsbt` supports this but needs wiring; alternatively, users can use a BTC CLI out-of-band.
-- **Chain monitors**: the frontend trusts the user to confirm on-chain events. A v2 should poll mempool.space and the Fistbump explorer and advance the UI automatically when funding txs confirm.
 - **Adaptor signatures / PTLCs**: the BTC side could be upgraded to PTLCs (better privacy, smaller on-chain footprint) as soon as FBC ships Schnorr via a consensus soft fork. Not v1.
+- **Multi-counterparty / multi-asset**: out of scope for v1 per SPEC §10.
 
 ## License
 

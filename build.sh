@@ -24,6 +24,12 @@ fi
 echo "==> building core"
 npm run build
 
+echo "==> bundling core + deps into single ESM file"
+# The frontend loads core via `./core/bundle.js`, which has all of
+# @noble/hashes, @scure/base, and @scure/btc-signer inlined. This lets the
+# site ship with `default-src 'self'` CSP and no third-party CDN calls.
+npm run bundle
+
 echo "==> syncing dist → web/app/core"
 rm -rf "$APP_CORE"
 mkdir -p "$APP_CORE"
