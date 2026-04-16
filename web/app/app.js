@@ -30,11 +30,102 @@ import {
   buildHTLCSpendPsbt,
   finalizeHTLCSpend,
   signAndFinalizeWithWIF,
-} from "./core/index.js";
+} from "./core/bundle.js";
+
+import { loadState, patchState, clearState, hasState } from "./state.js";
+import {
+  pollBtcConfirmations,
+  pollFbcConfirmations,
+  pollBtcTip,
+  pollFbcTip,
+  estimateWallClock,
+} from "./chain.js";
 
 const params = new URLSearchParams(location.search);
 const BTC_NETWORK = "main";
 const FBC_NETWORK = "main";
+
+// ---- UI primitives: toast + modal confirm + field-note helper ----
+//
+// Inline (not a separate module) because the whole app is one file and
+// shipping another module just for three helpers isn't worth the round-trip.
+
+const TOAST_STACK = document.getElementById("toast-stack");
+
+function showToast(message, kind) {
+  if (!TOAST_STACK) return;
+  const el = document.createElement("div");
+  el.className = "toast" + (kind ? ` ${kind}` : "");
+  el.textContent = message;
+  TOAST_STACK.appendChild(el);
+  const lifespan = kind === "error" ? 5200 : 2600;
+  setTimeout(() => {
+    el.classList.add("fade-out");
+    el.addEventListener("animationend", () => el.remove(), { once: true });
+  }, lifespan);
+}
+
+function setFieldNote(el, message, kind) {
+  if (!el) return;
+  el.textContent = message || "";
+  el.classList.remove("ok", "warn", "error");
+  if (kind) el.classList.add(kind);
+}
+
+// Modal-based replacement for the native `confirm()` prompt. Returns a
+// promise that resolves to true if the user confirms, false otherwise.
+// `danger=true` styles the confirm button red for destructive actions.
+function confirmModal({ title, body, confirmLabel, cancelLabel, danger }) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "modal-backdrop";
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    backdrop.appendChild(modal);
+
+    const h = document.createElement("h3");
+    h.textContent = title;
+    modal.appendChild(h);
+
+    const p = document.createElement("p");
+    p.textContent = body;
+    modal.appendChild(p);
+
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn";
+    cancel.textContent = cancelLabel || "Cancel";
+    actions.appendChild(cancel);
+
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "btn primary";
+    if (danger) confirm.style.cssText = "background: var(--fb-red); border-color: var(--fb-red);";
+    confirm.textContent = confirmLabel || "Confirm";
+    actions.appendChild(confirm);
+
+    modal.appendChild(actions);
+    document.body.appendChild(backdrop);
+    confirm.focus();
+
+    const close = (ok) => {
+      backdrop.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(ok);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") close(false);
+      else if (e.key === "Enter") close(true);
+    };
+    cancel.addEventListener("click", () => close(false));
+    confirm.addEventListener("click", () => close(true));
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(false); });
+    document.addEventListener("keydown", onKey);
+  });
+}
 
 // Blockstream Esplora for BTC data + broadcast. 3xpl for explorer links.
 const BTC_API = "https://blockstream.info/api";
@@ -46,6 +137,90 @@ const FBC_API = "https://explorer.fistbump.org/api";
 // These match SPEC.md §4.2 defaults.
 const BTC_BLOCK_SECONDS = 600;
 const FBC_BLOCK_SECONDS = 120;
+
+// Dust floors per SPEC.md §8. Rejections go through validateOffer().
+const MIN_AMOUNT_BTC_SAT = 10_000;
+const MIN_AMOUNT_FBC_DOLLARYDOOS = 1_000_000;
+
+// Reference-height staleness guard from SPEC.md §4.3. If the offer says
+// btc/fbc tip was N blocks behind the accepter's observed tip, reject —
+// the parties are out of sync and T1/T2 estimates can't be compared safely.
+const MAX_REF_HEIGHT_STALENESS_BTC = 10;
+const MAX_REF_HEIGHT_STALENESS_FBC = 20;
+
+// Wall-clock buffer floor from SPEC.md §4.2: T2 − T1 ≥ 12 hours.
+const MIN_DELTA_HOURS = 12;
+
+/**
+ * Validate an offer before Bob acts on it, or before Alice re-funds against
+ * a stored one. Returns { ok: true } or { ok: false, reason }. Centralised
+ * so all call-sites stay consistent.
+ *
+ * `observed` carries the accepter's current view of BTC+FBC tips; when
+ * omitted the staleness check is skipped (useful for Alice re-opening her
+ * own offer without making explorer calls).
+ */
+function validateOffer(offer, observed) {
+  if (!offer || typeof offer !== "object") return { ok: false, reason: "not an offer" };
+  if (offer.version !== 1 || offer.kind !== "offer") {
+    return { ok: false, reason: "wrong blob version or kind" };
+  }
+  if (!offer.network || offer.network.btc !== BTC_NETWORK || offer.network.fbc !== FBC_NETWORK) {
+    return {
+      ok: false,
+      reason: `offer is for ${offer.network?.btc}/${offer.network?.fbc}, this site is ${BTC_NETWORK}/${FBC_NETWORK}`,
+    };
+  }
+  if (!Number.isInteger(offer.amount_btc) || offer.amount_btc < MIN_AMOUNT_BTC_SAT) {
+    return { ok: false, reason: `amount_btc must be ≥ ${MIN_AMOUNT_BTC_SAT.toLocaleString()} sat` };
+  }
+  if (!Number.isInteger(offer.amount_fbc) || offer.amount_fbc < MIN_AMOUNT_FBC_DOLLARYDOOS) {
+    return {
+      ok: false,
+      reason: `amount_fbc must be ≥ ${MIN_AMOUNT_FBC_DOLLARYDOOS.toLocaleString()} dollarydoos (1 FBC)`,
+    };
+  }
+  if (offer.fbc_refund_height <= offer.btc_refund_height) {
+    return {
+      ok: false,
+      reason: "unsafe offer: FBC refund height must exceed BTC refund height",
+    };
+  }
+  // Wall-clock buffer check: (T2 − btc_ref) * FBC_BLOCK − (T1 − btc_ref) * BTC_BLOCK
+  // is the approximate clock-time delta between refund paths at broadcast.
+  const btcSecondsToT1 = (offer.btc_refund_height - offer.btc_reference_height) * BTC_BLOCK_SECONDS;
+  const fbcSecondsToT2 = (offer.fbc_refund_height - offer.fbc_reference_height) * FBC_BLOCK_SECONDS;
+  const deltaHours = (fbcSecondsToT2 - btcSecondsToT1) / 3600;
+  if (deltaHours < MIN_DELTA_HOURS) {
+    return {
+      ok: false,
+      reason: `Δ = ${deltaHours.toFixed(1)}h, must be ≥ ${MIN_DELTA_HOURS}h (SPEC §4.2)`,
+    };
+  }
+  if (offer.expires_at) {
+    const expiry = Date.parse(offer.expires_at);
+    if (!Number.isNaN(expiry) && expiry < Date.now()) {
+      return { ok: false, reason: `offer expired at ${offer.expires_at}` };
+    }
+  }
+  if (observed) {
+    if (Number.isInteger(observed.btcTip) &&
+        offer.btc_reference_height < observed.btcTip - MAX_REF_HEIGHT_STALENESS_BTC) {
+      return {
+        ok: false,
+        reason: `BTC reference height ${offer.btc_reference_height} is > ${MAX_REF_HEIGHT_STALENESS_BTC} blocks behind current tip ${observed.btcTip}`,
+      };
+    }
+    if (Number.isInteger(observed.fbcTip) &&
+        offer.fbc_reference_height < observed.fbcTip - MAX_REF_HEIGHT_STALENESS_FBC) {
+      return {
+        ok: false,
+        reason: `FBC reference height ${offer.fbc_reference_height} is > ${MAX_REF_HEIGHT_STALENESS_FBC} blocks behind current tip ${observed.fbcTip}`,
+      };
+    }
+  }
+  return { ok: true };
+}
 
 // Session state for the Alice role.
 const alice = {
@@ -87,6 +262,9 @@ function selectRole(name) {
   roleBob.setAttribute("aria-selected", String(!isAlice));
   flowAlice.classList.toggle("hidden", !isAlice);
   flowBob.classList.toggle("hidden", isAlice);
+  // Refresh the in-progress pill on role switch so the indicator on the
+  // now-inactive tab picks up any changes written since the last tick.
+  if (typeof updateRolePill === "function") updateRolePill();
 }
 roleAlice.addEventListener("click", () => selectRole("alice"));
 roleBob.addEventListener("click", () => selectRole("bob"));
@@ -160,9 +338,9 @@ const buildOfferBtn = document.getElementById("build-offer");
 function updateTimelockNote() {
   const btcH = Number(btcHoursInput.value);
   const fbcH = Number(fbcHoursInput.value);
-  if (fbcH - btcH < 12) {
+  if (fbcH - btcH < MIN_DELTA_HOURS) {
     timelockNote.textContent =
-      `FBC window must exceed BTC window by at least 12 hours. Currently ${fbcH - btcH} hrs.`;
+      `FBC window must exceed BTC window by at least ${MIN_DELTA_HOURS} hours. Currently ${fbcH - btcH} hrs.`;
     timelockNote.classList.remove("ok");
     timelockNote.classList.add("error");
   } else {
@@ -183,19 +361,65 @@ function updateTimelockNote() {
 updateTimelockNote();
 
 function updateAliceBuildOfferEnabled() {
-  const amtBtc = Number(amountBtcInput.value);
-  const amtFbc = Number(amountFbcInput.value);
+  const amtBtcSat = Math.round(Number(amountBtcInput.value) * 1e8);
+  const amtFbcDd = Math.round(Number(amountFbcInput.value) * 1e6);
   const btcH = Number(btcHoursInput.value);
   const fbcH = Number(fbcHoursInput.value);
   const valid =
     alice.btc &&
     alice.fbc &&
-    amtBtc > 0 &&
-    amtFbc > 0 &&
+    amtBtcSat >= MIN_AMOUNT_BTC_SAT &&
+    amtFbcDd >= MIN_AMOUNT_FBC_DOLLARYDOOS &&
     btcH >= 1 &&
     fbcH >= 2 &&
-    fbcH - btcH >= 12;
+    fbcH - btcH >= MIN_DELTA_HOURS;
   buildOfferBtn.disabled = !valid;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Scan a Bitcoin tx for the output paying `address`, returning its vout
+ * index. Polls Blockstream up to `tries` times with exponential-ish backoff
+ * because the indexer may not have the tx yet right after broadcast.
+ *
+ * Throws if the tx still isn't indexed after all tries — the caller is
+ * expected to surface this to the user rather than fall back to vout=0,
+ * which would produce an invalid funded_btc blob.
+ */
+async function resolveFundingVout(txid, address, statusEl) {
+  const TRIES = 6;
+  const DELAYS_MS = [1000, 2000, 3000, 5000, 8000, 13000];
+  let lastErr = null;
+  for (let i = 0; i < TRIES; i++) {
+    try {
+      const res = await fetch(`${BTC_API}/tx/${txid}`);
+      if (res.ok) {
+        const txData = await res.json();
+        const idx = txData.vout.findIndex(
+          (o) => o.scriptpubkey_address === address,
+        );
+        if (idx >= 0) return idx;
+        throw new Error("tx has no output paying the HTLC address");
+      }
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+    if (statusEl) {
+      setFieldNote(
+        statusEl,
+        `Waiting for Blockstream indexer to pick up tx… (${i + 1}/${TRIES})`,
+      );
+    }
+    await sleep(DELAYS_MS[i]);
+  }
+  throw new Error(
+    `Could not resolve funding vout for ${txid} after ${TRIES} tries. ` +
+    `Last error: ${lastErr?.message || "unknown"}. ` +
+    `The tx DID broadcast — wait a minute, reload the page, and use the ` +
+    `resume flow with the txid to continue.`,
+  );
 }
 
 async function fetchBtcTipHeight() {
@@ -211,14 +435,20 @@ async function fetchBtcFeeRate() {
   // where key = target blocks, value = sat/vB. Use target 3 (~30 min).
   // Floor at 3 sat/vB: HTLC claims are time-sensitive and sub-1 sat/vB
   // txs may never relay.
+  // Ceiling at 500 sat/vB: a Blockstream hiccup returning nonsense (or a
+  // real pathological fee market) shouldn't be able to drain a 50k-sat HTLC
+  // into fees. 500 sat/vB is already ~75k sats on a 150-vbyte claim, which
+  // exceeds the dust floor we enforce; if the real rate is above this the
+  // user should be signing manually with Sparrow anyway.
   const FLOOR = 3;
+  const CEILING = 500;
   try {
     const res = await fetch(`${BTC_API}/fee-estimates`);
     if (!res.ok) throw new Error(String(res.status));
     const j = await res.json();
     const rate = Number(j["3"]);
     const chosen = rate > 0 && isFinite(rate) ? Math.ceil(rate) : 20;
-    return Math.max(chosen, FLOOR);
+    return Math.min(Math.max(chosen, FLOOR), CEILING);
   } catch {
     return 20;
   }
@@ -276,8 +506,19 @@ buildOfferBtn.addEventListener("click", async () => {
     document.getElementById("offer-blob").value = envelope;
     document.getElementById("offer-json").textContent = JSON.stringify(offer, null, 2);
     document.getElementById("process-accept").disabled = false;
+
+    // Checkpoint — if Alice closes the tab here, the preimage and offer
+    // can be recovered on next load. Without this the preimage is ONLY
+    // in memory, and losing it means forfeiting the claim (must refund).
+    patchState("alice", {
+      preimage: toHex(alice.preimage),
+      hashlock: toHex(alice.hashlock),
+      offerId: alice.offerId,
+      offer,
+      step: "offer-built",
+    });
   } catch (err) {
-    alert(`Could not build offer: ${err.message}`);
+    showToast(`Could not build offer: ${err.message}`, "error");
   } finally {
     updateAliceBuildOfferEnabled();
   }
@@ -285,7 +526,9 @@ buildOfferBtn.addEventListener("click", async () => {
 
 document.getElementById("copy-offer").addEventListener("click", () => {
   const v = document.getElementById("offer-blob").value;
-  if (v) navigator.clipboard.writeText(v);
+  if (!v) return;
+  navigator.clipboard.writeText(v);
+  showToast("Offer blob copied to clipboard", "ok");
 });
 
 // ---- Alice: process accept, fund BTC ----
@@ -304,6 +547,10 @@ document.getElementById("process-accept").addEventListener("click", async () => 
     alice.fbcScript = buildHTLCScript(fbc);
 
     const btcAddr = btcHTLCAddress(alice.btcScript, BTC_NETWORK);
+    // Live fee preview so Alice isn't surprised by the BTC claim/refund
+    // burden. This is the rate that her refund tx would use today —
+    // her funding tx fee is set by the wallet, not us.
+    const feeRate = await fetchBtcFeeRate();
     renderSummary(document.getElementById("btc-fund-summary"), [
       { label: "Fund amount", text: `${alice.offer.amount_btc.toLocaleString()} sat` },
       { label: "HTLC address", mono: btcAddr },
@@ -312,12 +559,15 @@ document.getElementById("process-accept").addEventListener("click", async () => 
         text: alice.offer.btc_refund_height.toLocaleString(),
       },
       { label: "Hashlock", mono: `${alice.offer.hashlock.slice(0, 24)}…` },
+      { label: "BTC fee estimate (refund)", text: `~${feeRate} sat/vB × ~150 vB ≈ ${(feeRate * 150).toLocaleString()} sat` },
     ]);
     document.getElementById("fund-btc").disabled = false;
 
     statusEl.textContent = "Accept verified. Review and fund when ready.";
     statusEl.classList.remove("error");
     statusEl.classList.add("ok");
+
+    patchState("alice", { accept, step: "accept-verified" });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -329,26 +579,34 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
   const statusEl = document.getElementById("btc-fund-status");
   try {
     if (!window.unisat) throw new Error("BTC wallet not connected");
+    // SPEC §5.1: if `expires_at` has passed, warn before funding. The offer
+    // was built with a 1h expiry by default; Bob may have sat on the accept,
+    // in which case Alice could be funding against an agreement Bob has
+    // since forgotten about.
+    if (alice.offer?.expires_at) {
+      const expiry = Date.parse(alice.offer.expires_at);
+      if (Number.isFinite(expiry) && expiry < Date.now()) {
+        const ok = await confirmModal({
+          title: "Offer has expired",
+          body: `This offer expired at ${alice.offer.expires_at}. Your counterparty may not be watching for your BTC funding anymore. Continue anyway?`,
+          confirmLabel: "Fund anyway",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+    }
     const addr = btcHTLCAddress(alice.btcScript, BTC_NETWORK);
+    setFieldNote(statusEl, "Signing BTC funding tx in wallet…");
     const txid = await window.unisat.sendBitcoin(addr, alice.offer.amount_btc);
     alice.btcFundedTxid = txid;
     // Unisat only returns the txid — it does not guarantee which output
-    // index is the HTLC. Fetch the tx from the explorer and scan outputs
-    // to find the one paying our P2WSH address.
-    let actualVout = 0;
-    try {
-      const txRes = await fetch(`${BTC_API}/tx/${txid}`);
-      if (txRes.ok) {
-        const txData = await txRes.json();
-        const idx = txData.vout.findIndex(
-          (o) => o.scriptpubkey_address === addr,
-        );
-        if (idx >= 0) actualVout = idx;
-      }
-    } catch {
-      // If fetch fails, fall back to 0 — the tx just broadcast so the
-      // indexer may not have it yet. Bob verifies script + amount anyway.
-    }
+    // index is the HTLC. Poll Blockstream until the tx appears so we can
+    // scan its outputs for the one paying our P2WSH address. Silently
+    // falling back to vout=0 used to be a footgun: Bob's verifyFundedBtc
+    // would pass (amount+script still match) but his on-chain claim would
+    // spend the wrong output and fail.
+    setFieldNote(statusEl, "Resolving funding output (Blockstream indexer)…");
+    const actualVout = await resolveFundingVout(txid, addr, statusEl);
     alice.btcFundedVout = actualVout;
     const fundedBlob = encodeBlob({
       version: 1,
@@ -366,7 +624,23 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
       chain: "btc",
       followup: "funded_btc blob copied to your clipboard — send it to your counterparty.",
     });
+    showToast("funded_btc blob copied to clipboard", "ok");
     document.getElementById("claim-fbc").disabled = false;
+
+    // Live "N/6 confirmations" under the fund status so Alice can tell
+    // her counterparty when BTC is safe to act on, without leaving the
+    // tab for an explorer.
+    startBtcConfWatch(statusEl, txid, BTC_CONF_TARGET);
+    // Start the refund countdown. The button stays disabled until the
+    // BTC tip reaches T1; the countdown provides the context so the user
+    // knows how long until recovery becomes available.
+    startAliceBtcRefundCountdown();
+
+    patchState("alice", {
+      btcFundedTxid: txid,
+      btcFundedVout: actualVout,
+      step: "btc-funded",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -384,11 +658,13 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
     if (!alice.btcFundedTxid || !alice.btcScript) {
       throw new Error("you haven't funded BTC in this session");
     }
-    if (!confirm(
-      "Refund is only valid after the BTC refund height. " +
-      "If you already claimed FBC in step 6, DO NOT refund — " +
-      "the swap has already completed. Continue?"
-    )) return;
+    const ok = await confirmModal({
+      title: "Refund your BTC?",
+      body: "Only valid after the BTC refund height. If you already claimed FBC in step 6, DO NOT refund — the swap has already completed and refunding will just burn a tx fee.",
+      confirmLabel: "Refund",
+      danger: true,
+    });
+    if (!ok) return;
 
     const witnessScript = alice.btcScript.scriptBytes;
     const feeRate = await fetchBtcFeeRate();
@@ -429,6 +705,9 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
       txid: broadcastTxid || txid,
       chain: "btc",
     });
+    // Swap is now terminally refunded — no reason to keep the preimage.
+    clearState("alice");
+    showToast("Refund broadcast. Swap cleared from storage.", "ok");
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -444,6 +723,20 @@ document.getElementById("claim-fbc").addEventListener("click", async () => {
     if (funded.kind !== "funded_fbc") throw new Error("not a funded_fbc blob");
     const v = verifyFundedFbc(alice.offer, alice.accept, funded);
     if (!v.ok) throw new Error(`funded_fbc verification failed: ${v.reason}`);
+
+    // SPEC §5.4: ≥ 12 FBC confirmations before claim. A claim before that
+    // risks a reorg burying the claim tx while Bob still gets to keep his
+    // side; atomicity isn't violated but it can cause a protocol hang.
+    const fbcLatest = await checkFbcConfirmations(funded.funding_txid);
+    if (fbcLatest.confirmations < FBC_CONF_TARGET) {
+      const proceed = await confirmModal({
+        title: "FBC not yet confirmed enough",
+        body: `Their FBC funding has ${fbcLatest.confirmations}/${FBC_CONF_TARGET} confirmations. Recommended: wait. Claim anyway?`,
+        confirmLabel: "Claim anyway",
+        danger: true,
+      });
+      if (!proceed) return;
+    }
 
     const res = await window.fistbump.signHtlcSpend({
       fundingTxid: funded.funding_txid,
@@ -461,37 +754,10 @@ document.getElementById("claim-fbc").addEventListener("click", async () => {
       chain: "fbc",
       followup: "Counterparty can now claim their BTC using the preimage below.",
     });
-    // The preimage has just been revealed on-chain, so sharing it isn't a
-    // security change — but the counterparty needs to get their hands on
-    // it to claim BTC, and the explorer doesn't render witness data. Show
-    // it here so Alice can copy + paste to Bob directly (fastest path) or
-    // Bob can look it up from the tx himself.
-    const preimagePanel = document.createElement("div");
-    preimagePanel.style.cssText =
-      "margin-top:12px;padding:12px;background:var(--fb-bg-raised);border:1px solid var(--fb-border);border-radius:var(--fb-radius);";
-    const label = document.createElement("div");
-    label.textContent = "Preimage — send this to your counterparty:";
-    label.style.cssText =
-      "font-size:var(--fb-text-xs);color:var(--fb-text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;";
-    preimagePanel.appendChild(label);
-    const preimageHex = toHex(alice.preimage);
-    const mono = document.createElement("code");
-    mono.textContent = preimageHex;
-    mono.style.cssText = "word-break:break-all;user-select:all;font-size:var(--fb-text-sm);";
-    preimagePanel.appendChild(mono);
-    preimagePanel.appendChild(document.createElement("br"));
-    const copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "btn";
-    copyBtn.style.cssText = "margin-top:8px;height:26px;padding:0 10px;font-size:12px;";
-    copyBtn.textContent = "Copy preimage";
-    copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(preimageHex);
-      copyBtn.textContent = "Copied";
-      setTimeout(() => (copyBtn.textContent = "Copy preimage"), 1200);
-    });
-    preimagePanel.appendChild(copyBtn);
-    statusEl.appendChild(preimagePanel);
+    // Mark the swap as complete in storage but keep the preimage so the
+    // reload banner can re-display the hand-off panel until Alice dismisses.
+    patchState("alice", { step: "fbc-claimed" });
+    renderPreimagePanel(statusEl, toHex(alice.preimage));
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -531,25 +797,33 @@ function updateBobButtons() {
 // ---- Bob: read offer, send accept ----
 
 document.getElementById("process-offer").addEventListener("click", async () => {
+  const statusEl = document.getElementById("offer-status");
   try {
     const raw = document.getElementById("offer-blob-in").value.trim();
     const offer = decodeBlob(raw);
     if (offer.kind !== "offer") throw new Error("not an offer blob");
-    if (offer.fbc_refund_height <= offer.btc_refund_height) {
-      throw new Error(
-        "UNSAFE OFFER — FBC refund height (" + offer.fbc_refund_height +
-        ") must be greater than BTC refund height (" + offer.btc_refund_height +
-        "). Reject this offer.",
-      );
-    }
+
+    // Observe live tips so we can reject offers built against stale heights.
+    // Fetches are best-effort — if either explorer is down, validate without
+    // the staleness leg rather than forcing the user to retry.
+    setFieldNote(statusEl, "Checking offer against current chain tips…");
+    const [btcTip, fbcTip] = await Promise.all([
+      fetchBtcTipHeight().catch(() => null),
+      fetchFbcTipHeight().catch(() => null),
+    ]);
+    const v = validateOffer(offer, { btcTip, fbcTip });
+    if (!v.ok) throw new Error(v.reason);
+
     bob.offer = offer;
 
     const summary = document.getElementById("offer-summary");
+    const btcSecondsToT1 = (offer.btc_refund_height - offer.btc_reference_height) * BTC_BLOCK_SECONDS;
+    const fbcSecondsToT2 = (offer.fbc_refund_height - offer.fbc_reference_height) * FBC_BLOCK_SECONDS;
     renderSummary(summary, [
       { label: "They send", text: `${offer.amount_btc.toLocaleString()} sat BTC` },
       { label: "You send", text: `${(offer.amount_fbc / 1e6).toLocaleString()} FBC` },
-      { label: "BTC refund after", text: `block ${offer.btc_refund_height.toLocaleString()}` },
-      { label: "FBC refund after", text: `block ${offer.fbc_refund_height.toLocaleString()}` },
+      { label: "BTC refund after", text: `block ${offer.btc_refund_height.toLocaleString()} (~${(btcSecondsToT1 / 3600).toFixed(1)}h)` },
+      { label: "FBC refund after", text: `block ${offer.fbc_refund_height.toLocaleString()} (~${(fbcSecondsToT2 / 3600).toFixed(1)}h)` },
       { label: "Hashlock", mono: `${offer.hashlock.slice(0, 24)}…` },
     ]);
     summary.classList.remove("hidden");
@@ -564,14 +838,23 @@ document.getElementById("process-offer").addEventListener("click", async () => {
     bob.accept = accept;
     document.getElementById("accept-blob").value = encodeBlob(accept);
     document.getElementById("fund-fbc").disabled = false;
+    setFieldNote(statusEl, "Offer verified. Send your accept below.", "ok");
+
+    patchState("bob", {
+      offer,
+      accept,
+      step: "accept-sent",
+    });
   } catch (err) {
-    alert(err.message);
+    setFieldNote(statusEl, err.message, "error");
   }
 });
 
 document.getElementById("copy-accept").addEventListener("click", () => {
   const v = document.getElementById("accept-blob").value;
-  if (v) navigator.clipboard.writeText(v);
+  if (!v) return;
+  navigator.clipboard.writeText(v);
+  showToast("Accept blob copied to clipboard", "ok");
 });
 
 // ---- Bob: verify counterparty BTC funding, fund FBC ----
@@ -589,9 +872,24 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
     // amount, and script to build the claim PSBT in step 5.
     bob.btcFunded = funded;
 
+    // SPEC §5.3 requires ≥ 6 BTC confirmations before funding FBC.
+    // Block on a live confirmation check rather than trusting the user
+    // to read the counter.
+    const latest = await checkBtcConfirmations(funded.funding_txid);
+    if (latest.confirmations < BTC_CONF_TARGET) {
+      const proceed = await confirmModal({
+        title: "BTC not yet confirmed",
+        body: `Their BTC funding has ${latest.confirmations}/${BTC_CONF_TARGET} confirmations. Funding FBC now means if BTC is reorged out, your FBC sits in an HTLC that no one can claim — only refund at T2. Recommended: wait. Proceed anyway?`,
+        confirmLabel: "Fund FBC anyway",
+        danger: true,
+      });
+      if (!proceed) return;
+    }
+
     const { fbc } = htlcsFromOfferAccept(bob.offer, bob.accept);
     bob.fbcScript = buildHTLCScript(fbc);
-    void fbcHTLCAddress(bob.fbcScript, FBC_NETWORK);
+    const fbcAddr = fbcHTLCAddress(bob.fbcScript, FBC_NETWORK);
+    console.debug("FBC HTLC address:", fbcAddr);
 
     const res = await window.fistbump.fundHtlc({
       witnessScriptHex: toHex(bob.fbcScript.scriptBytes),
@@ -617,9 +915,18 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       chain: "fbc",
       followup: "funded_fbc blob copied to your clipboard — send it to your counterparty.",
     });
+    showToast("funded_fbc blob copied to clipboard", "ok");
 
     document.getElementById("claim-btc").disabled = false;
-    document.getElementById("refund-fbc").disabled = false;
+
+    startBobFbcRefundCountdown();
+
+    patchState("bob", {
+      btcFunded: funded,
+      fbcFundedTxid: res.txid,
+      fbcFundedVout: res.vout,
+      step: "fbc-funded",
+    });
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -709,6 +1016,8 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
       txid: broadcastTxid || txid,
       chain: "btc",
     });
+    clearState("bob");
+    showToast("BTC claim broadcast. Swap complete.", "ok");
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -800,6 +1109,8 @@ document.getElementById("sign-with-wif").addEventListener("click", async () => {
       txid: body || txid,
       chain: "btc",
     });
+    clearState("bob");
+    showToast("BTC claim broadcast. Swap complete.", "ok");
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -834,6 +1145,8 @@ document.getElementById("finalize-external").addEventListener("click", async () 
       txid: body || txid,
       chain: "btc",
     });
+    clearState("bob");
+    showToast("BTC claim broadcast. Swap complete.", "ok");
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
@@ -849,17 +1162,23 @@ document.getElementById("refund-fbc").addEventListener("click", async () => {
     if (!bob.fbcFundedTxid || !bob.fbcScript) {
       throw new Error("you haven't funded FBC in this session");
     }
-    if (!confirm(
-      "Refund is only valid after the FBC refund height. " +
-      "Continue?"
-    )) return;
+    const ok = await confirmModal({
+      title: "Refund your FBC?",
+      body: "Only valid after the FBC refund height. Continue?",
+      confirmLabel: "Refund",
+      danger: true,
+    });
+    if (!ok) return;
 
+    // locktime is REQUIRED for the refund branch per SPEC.md Appendix B —
+    // without it the wallet can't set nLockTime on the tx and OP_CLTV fails.
     const res = await window.fistbump.signHtlcSpend({
       fundingTxid: bob.fbcFundedTxid,
       fundingVout: bob.fbcFundedVout,
       fundingAmount: bob.offer.amount_fbc,
       witnessScriptHex: toHex(bob.fbcScript.scriptBytes),
       branch: "refund",
+      locktime: bob.offer.fbc_refund_height,
       destinationAddress: bob.fbc.address,
       feeRate: 1000,
     });
@@ -868,12 +1187,66 @@ document.getElementById("refund-fbc").addEventListener("click", async () => {
       txid: res.txid,
       chain: "fbc",
     });
+    clearState("bob");
+    showToast("FBC refund broadcast. Swap cleared from storage.", "ok");
   } catch (err) {
     statusEl.textContent = err.message;
     statusEl.classList.remove("ok");
     statusEl.classList.add("error");
   }
 });
+
+// Render a "Preimage — send this to your counterparty" panel. Factored so
+// the post-claim moment AND the persistence-restore banner can both use it.
+// The preimage is already on-chain by the time this renders, so displaying
+// it isn't a security change — the counterparty needs it to claim BTC and
+// the explorer won't always render witness data cleanly.
+function renderPreimagePanel(parent, preimageHex) {
+  const existing = parent.querySelector(".preimage-panel");
+  if (existing) existing.remove();
+  const panel = document.createElement("div");
+  panel.className = "preimage-panel";
+
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = "Preimage — send this to your counterparty:";
+  panel.appendChild(label);
+
+  const mono = document.createElement("code");
+  mono.textContent = preimageHex;
+  panel.appendChild(mono);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "btn";
+  copyBtn.style.cssText = "margin-right:8px;height:26px;padding:0 10px;font-size:12px;";
+  copyBtn.textContent = "Copy preimage";
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(preimageHex);
+    showToast("Preimage copied to clipboard", "ok");
+  });
+  panel.appendChild(copyBtn);
+
+  const dismissBtn = document.createElement("button");
+  dismissBtn.type = "button";
+  dismissBtn.className = "btn";
+  dismissBtn.style.cssText = "height:26px;padding:0 10px;font-size:12px;";
+  dismissBtn.textContent = "Dismiss and clear swap";
+  dismissBtn.addEventListener("click", async () => {
+    const ok = await confirmModal({
+      title: "Clear this swap?",
+      body: "Only do this once your counterparty has successfully claimed their BTC. The preimage will be forgotten locally — it remains public on-chain, but dismissing removes the reload banner.",
+      confirmLabel: "Clear",
+    });
+    if (!ok) return;
+    clearState("alice");
+    panel.remove();
+    showToast("Swap cleared from browser storage", "ok");
+  });
+  panel.appendChild(dismissBtn);
+
+  parent.appendChild(panel);
+}
 
 // ---- Detail card renderer (DOM-safe, no innerHTML) ----
 // Matches the .detail-card / .detail-row pattern used by web/ and docs/.
@@ -962,6 +1335,149 @@ function renderSummary(container, rows) {
 updateAliceBuildOfferEnabled();
 updateBobButtons();
 
+// ---- Live confirmation tracking ----
+//
+// SPEC.md §5.3 and §5.4 require ≥ 6 BTC confirmations (Bob before funding
+// FBC) and ≥ 12 FBC confirmations (Alice before claiming FBC). Prior UI
+// left enforcement to prose — now we poll the chain and gate the button.
+
+const BTC_CONF_TARGET = 6;
+const FBC_CONF_TARGET = 12;
+const activePolls = []; // cleanup on refresh/navigate
+
+window.addEventListener("beforeunload", () => {
+  for (const stop of activePolls.splice(0)) stop();
+});
+
+function renderConfLine(container, label, state, target) {
+  const existing = container.querySelector(".conf-line");
+  const line = existing || document.createElement("div");
+  if (!existing) {
+    line.className = "conf-line";
+    container.appendChild(line);
+  }
+  line.replaceChildren();
+
+  const text = document.createElement("span");
+  const ready = state.confirmations >= target;
+  text.textContent = ready
+    ? `${label}: ${state.confirmations}/${target} confirmations — ready.`
+    : state.confirmed
+      ? `${label}: ${state.confirmations}/${target} confirmations…`
+      : `${label}: waiting for tx to enter a block…`;
+  line.appendChild(text);
+
+  const bar = document.createElement("span");
+  bar.className = "bar";
+  const fill = document.createElement("span");
+  fill.className = "fill";
+  fill.style.width = `${Math.min(100, (state.confirmations / target) * 100)}%`;
+  bar.appendChild(fill);
+  line.appendChild(bar);
+
+  line.classList.toggle("ready", ready);
+  return ready;
+}
+
+function startBtcConfWatch(container, txid, target) {
+  const stop = pollBtcConfirmations(txid, (state) => renderConfLine(container, "BTC funding", state, target));
+  activePolls.push(stop);
+  return stop;
+}
+
+async function checkFbcConfirmations(txid) {
+  try {
+    const [txRes, tipRes] = await Promise.all([
+      fetch(`${FBC_API}/tx/${txid}`),
+      fetch(`${FBC_API}/blocks?limit=1`),
+    ]);
+    const txData = txRes.ok ? await txRes.json() : null;
+    const tipData = tipRes.ok ? await tipRes.json() : null;
+    const tip = Array.isArray(tipData) && tipData[0] ? Number(tipData[0].height) : null;
+    const blockH = txData?.block_height ?? txData?.height ?? null;
+    if (blockH != null && Number.isFinite(tip)) {
+      return { confirmations: Math.max(0, tip - Number(blockH) + 1), confirmed: true };
+    }
+    return { confirmations: 0, confirmed: false };
+  } catch {
+    return { confirmations: 0, confirmed: false };
+  }
+}
+
+// One-shot variant used by the pre-fund safety check on Bob's side.
+async function checkBtcConfirmations(txid) {
+  try {
+    const [statusRes, tipRes] = await Promise.all([
+      fetch(`https://blockstream.info/api/tx/${txid}/status`),
+      fetch(`https://blockstream.info/api/blocks/tip/height`),
+    ]);
+    const status = statusRes.ok ? await statusRes.json() : null;
+    const tip = tipRes.ok ? Number(await tipRes.text()) : null;
+    if (status?.confirmed && status.block_height && Number.isFinite(tip)) {
+      return { confirmations: Math.max(0, tip - status.block_height + 1), confirmed: true };
+    }
+    return { confirmations: 0, confirmed: false };
+  } catch {
+    return { confirmations: 0, confirmed: false };
+  }
+}
+
+function startFbcConfWatch(container, txid, target) {
+  const stop = pollFbcConfirmations(txid, (state) => renderConfLine(container, "FBC funding", state, target));
+  activePolls.push(stop);
+  return stop;
+}
+
+// ---- Refund countdowns ----
+//
+// Live "Refund in ~3h 20m (block T1)" text under each refund button,
+// with the button gated on (current tip ≥ refund height). Prevents the
+// user from broadcasting a refund tx that the mempool would reject
+// because its nLockTime is in the future.
+
+function wireRefundCountdown({ buttonId, noteId, chain, getHeight }) {
+  const button = document.getElementById(buttonId);
+  const note = document.getElementById(noteId);
+  if (!button || !note) return;
+  const poll = chain === "btc" ? pollBtcTip : pollFbcTip;
+  let ready = false;
+  const stop = poll((tip) => {
+    const target = getHeight();
+    if (!Number.isFinite(target)) return;
+    const remaining = target - tip;
+    if (remaining <= 0) {
+      ready = true;
+      button.disabled = false;
+      setFieldNote(note, `Refund available now (tip ${tip} ≥ ${target}).`, "ok");
+    } else {
+      if (!ready) button.disabled = true;
+      const clock = estimateWallClock(remaining, chain);
+      setFieldNote(note, `Refund available in ${clock} — at block ${target} (current tip ${tip}, ${remaining} to go).`);
+    }
+  });
+  activePolls.push(stop);
+}
+
+function startAliceBtcRefundCountdown() {
+  if (!alice.offer) return;
+  wireRefundCountdown({
+    buttonId: "refund-btc",
+    noteId: "refund-btc-countdown",
+    chain: "btc",
+    getHeight: () => alice.offer?.btc_refund_height,
+  });
+}
+
+function startBobFbcRefundCountdown() {
+  if (!bob.offer) return;
+  wireRefundCountdown({
+    buttonId: "refund-fbc",
+    noteId: "refund-fbc-countdown",
+    chain: "fbc",
+    getHeight: () => bob.offer?.fbc_refund_height,
+  });
+}
+
 // ---- Blob-type hints ----
 //
 // Attach a live "Detected: <kind> for offer <prefix>" hint under every
@@ -1007,6 +1523,251 @@ wireBlobHint("funded-fbc-in", "funded_fbc");
 wireBlobHint("offer-blob-in", "offer");
 wireBlobHint("funded-btc-in", "funded_btc");
 
+// Real-time preimage validation: tell the user *while typing* whether the
+// 64 hex chars they pasted actually hash to the HTLC's committed hashlock.
+// Without this the only feedback was at click-time, and the most common
+// failure mode (pasting the txid instead of the preimage) burned a round
+// trip to discover.
+(function wirePreimageHint() {
+  const input = document.getElementById("preimage-in");
+  if (!input) return;
+  const hint = document.createElement("div");
+  hint.className = "field-note";
+  hint.style.cssText = "margin:4px 0 var(--fb-space-md);font-family:var(--fb-font-mono);font-size:var(--fb-text-xs);";
+  input.insertAdjacentElement("afterend", hint);
+  input.addEventListener("input", () => {
+    const val = input.value.trim().toLowerCase();
+    if (!val) { hint.replaceChildren(); hint.classList.remove("ok", "error"); return; }
+    if (!/^[0-9a-f]{64}$/.test(val)) {
+      setFieldNote(hint, `Not 64 hex chars yet (${val.length}/64).`, "error");
+      return;
+    }
+    if (!bob.btcFunded?.witness_script_hex) {
+      setFieldNote(hint, "Valid 32-byte hex. Paste the funded_btc blob above to verify against the HTLC hashlock.", "ok");
+      return;
+    }
+    try {
+      const parsed = parseHTLCScript(fromHex(bob.btcFunded.witness_script_hex));
+      if (!parsed) { setFieldNote(hint, "Witness script is not a valid HTLC.", "error"); return; }
+      const computed = toHex(hashlockOf(fromHex(val)));
+      const expected = toHex(parsed.hashlock);
+      if (computed === expected) {
+        setFieldNote(hint, `Preimage matches the HTLC hashlock ✓ (SHA-256 = ${expected.slice(0, 16)}…)`, "ok");
+      } else {
+        setFieldNote(hint, `Hash mismatch — SHA-256 = ${computed.slice(0, 16)}…, expected ${expected.slice(0, 16)}…`, "error");
+      }
+    } catch (err) {
+      setFieldNote(hint, `Could not verify: ${err.message}`, "error");
+    }
+  });
+})();
+
+// Live confirmation watch attached to Bob's funded_btc paste field. As
+// soon as the user pastes a valid envelope, start polling so they can
+// watch confirms accrue before clicking Fund FBC.
+let bobBtcWatchStop = null;
+document.getElementById("funded-btc-in").addEventListener("input", (e) => {
+  if (bobBtcWatchStop) { bobBtcWatchStop(); bobBtcWatchStop = null; }
+  const val = e.target.value.trim();
+  if (!val) return;
+  try {
+    const blob = decodeBlob(val);
+    if (blob.kind !== "funded_btc" || !blob.funding_txid) return;
+    const statusEl = document.getElementById("fbc-fund-status");
+    bobBtcWatchStop = startBtcConfWatch(statusEl, blob.funding_txid, BTC_CONF_TARGET);
+  } catch {
+    /* ignore — wireBlobHint already surfaces a parse error */
+  }
+});
+
+// Same for Alice's funded_fbc paste — show FBC confirms accruing so she
+// knows when it's safe to claim (SPEC §5.4 requires ≥ 12 FBC confirms).
+let aliceFbcWatchStop = null;
+document.getElementById("funded-fbc-in").addEventListener("input", (e) => {
+  if (aliceFbcWatchStop) { aliceFbcWatchStop(); aliceFbcWatchStop = null; }
+  const val = e.target.value.trim();
+  if (!val) return;
+  try {
+    const blob = decodeBlob(val);
+    if (blob.kind !== "funded_fbc" || !blob.funding_txid) return;
+    const statusEl = document.getElementById("claim-status");
+    aliceFbcWatchStop = startFbcConfWatch(statusEl, blob.funding_txid, FBC_CONF_TARGET);
+  } catch {
+    /* ignore */
+  }
+});
+
+// ---- Automatic restore from localStorage ----
+//
+// If a prior session left persisted state, rehydrate the in-memory role
+// objects and show a banner at the top of the matching flow. This is the
+// mechanism that prevents Alice from losing her preimage if she closes the
+// tab mid-swap. We deliberately do NOT auto-select a role: the user opts
+// in by clicking the banner's "Resume" button, which avoids stomping on
+// fresh swaps on a shared machine.
+function renderResumeBanner(role, data) {
+  const container = (role === "alice" ? flowAlice : flowBob).querySelector(".container");
+  if (!container) return;
+  const banner = document.createElement("div");
+  banner.className = "resume-banner";
+  banner.dataset.role = role;
+
+  const text = document.createElement("span");
+  const idFrag = data.offerId ? ` ${data.offerId.slice(0, 8)}…` : "";
+  const when = data._savedAt ? ` (saved ${relTime(data._savedAt)})` : "";
+  text.textContent = `You have a ${role} swap${idFrag} in progress at "${data.step || "?"}"${when}.`;
+  banner.appendChild(text);
+
+  const actions = document.createElement("div");
+  actions.style.cssText = "display:flex;gap:8px;";
+
+  const resumeBtn = document.createElement("button");
+  resumeBtn.type = "button";
+  resumeBtn.className = "btn primary";
+  resumeBtn.style.cssText = "height:28px;padding:0 12px;font-size:12px;";
+  resumeBtn.textContent = "Resume";
+  resumeBtn.addEventListener("click", () => {
+    selectRole(role);
+    hydrate(role, data);
+    banner.remove();
+    updateRolePill();
+    showToast(`Resumed ${role} swap from ${data.step || "saved state"}`, "ok");
+  });
+  actions.appendChild(resumeBtn);
+
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "dismiss";
+  dismiss.textContent = "Discard";
+  dismiss.addEventListener("click", async () => {
+    const ok = await confirmModal({
+      title: `Discard saved ${role} swap?`,
+      body: "Only discard if you're sure the on-chain swap is resolved. For Alice, discarding before claiming FBC forfeits the swap; she'll have to wait until the BTC refund height to recover her coins.",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+    if (!ok) return;
+    clearState(role);
+    banner.remove();
+    updateRolePill();
+  });
+  actions.appendChild(dismiss);
+
+  banner.appendChild(actions);
+  container.prepend(banner);
+}
+
+// Short relative-time formatter: "3m ago", "2h ago", "5d ago".
+function relTime(ms) {
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const m = Math.floor(diffSec / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// Reconstruct in-memory state from persisted data, enabling the buttons
+// appropriate for the step reached. Called only when the user clicks
+// "Resume" on the banner.
+function hydrate(role, data) {
+  if (role === "alice") {
+    if (data.preimage) alice.preimage = fromHex(data.preimage);
+    if (data.hashlock) alice.hashlock = fromHex(data.hashlock);
+    if (data.offerId) alice.offerId = data.offerId;
+    if (data.offer) {
+      alice.offer = data.offer;
+      document.getElementById("offer-blob").value = encodeBlob(data.offer);
+      document.getElementById("offer-json").textContent = JSON.stringify(data.offer, null, 2);
+      document.getElementById("process-accept").disabled = false;
+    }
+    if (data.accept) {
+      alice.accept = data.accept;
+      document.getElementById("accept-blob-in").value = encodeBlob(data.accept);
+      if (data.offer) {
+        const { btc, fbc } = htlcsFromOfferAccept(data.offer, data.accept);
+        alice.btcScript = buildHTLCScript(btc);
+        alice.fbcScript = buildHTLCScript(fbc);
+        const btcAddr = btcHTLCAddress(alice.btcScript, BTC_NETWORK);
+        renderSummary(document.getElementById("btc-fund-summary"), [
+          { label: "Fund amount", text: `${data.offer.amount_btc.toLocaleString()} sat` },
+          { label: "HTLC address", mono: btcAddr },
+          { label: "Refund at block", text: data.offer.btc_refund_height.toLocaleString() },
+          { label: "Hashlock", mono: `${data.offer.hashlock.slice(0, 24)}…` },
+        ]);
+        document.getElementById("fund-btc").disabled = false;
+      }
+    }
+    if (data.btcFundedTxid) {
+      alice.btcFundedTxid = data.btcFundedTxid;
+      alice.btcFundedVout = data.btcFundedVout ?? 0;
+      document.getElementById("claim-fbc").disabled = false;
+      // Button stays disabled by default; countdown enables it when the
+      // BTC tip reaches T1.
+      startBtcConfWatch(
+        document.getElementById("btc-fund-status"),
+        data.btcFundedTxid,
+        BTC_CONF_TARGET,
+      );
+      startAliceBtcRefundCountdown();
+    }
+    if (data.step === "fbc-claimed" && data.preimage) {
+      const claimStatus = document.getElementById("claim-status");
+      setFieldNote(claimStatus, "Swap completed in a previous session. Preimage shown below for hand-off.", "ok");
+      renderPreimagePanel(claimStatus, data.preimage);
+    }
+  } else if (role === "bob") {
+    if (data.offer) {
+      bob.offer = data.offer;
+      document.getElementById("offer-blob-in").value = encodeBlob(data.offer);
+    }
+    if (data.accept) {
+      bob.accept = data.accept;
+      document.getElementById("accept-blob").value = encodeBlob(data.accept);
+      if (data.offer) {
+        const { fbc } = htlcsFromOfferAccept(data.offer, data.accept);
+        bob.fbcScript = buildHTLCScript(fbc);
+      }
+    }
+    if (data.btcFunded) {
+      bob.btcFunded = data.btcFunded;
+      document.getElementById("funded-btc-in").value = encodeBlob(data.btcFunded);
+    }
+    if (data.fbcFundedTxid) {
+      bob.fbcFundedTxid = data.fbcFundedTxid;
+      bob.fbcFundedVout = data.fbcFundedVout ?? 0;
+      document.getElementById("claim-btc").disabled = false;
+      startBobFbcRefundCountdown();
+    }
+  }
+}
+
+// ---- Role-switch "swap in progress" pill ----
+// Shown on the *inactive* role tab so the user doesn't lose track of a
+// half-finished Alice swap while looking at the Bob flow (or vice versa).
+function updateRolePill() {
+  for (const [role, btn] of [["alice", roleAlice], ["bob", roleBob]]) {
+    const sub = btn.querySelector(".role-sub");
+    if (!sub) continue;
+    sub.querySelector(".resume-pill")?.remove();
+    if (hasState(role)) {
+      const pill = document.createElement("span");
+      pill.className = "resume-pill";
+      pill.textContent = "in progress";
+      sub.appendChild(pill);
+    }
+  }
+}
+updateRolePill();
+
+(function restoreFromStorage() {
+  for (const role of ["alice", "bob"]) {
+    const data = loadState(role);
+    if (data) renderResumeBanner(role, data);
+  }
+})();
+
 // ---- Dev resume ----
 //
 // Add `?resume=bob-claim-btc&funded=<base64url>&preimage=<hex>` to the URL
@@ -1050,6 +1811,6 @@ wireBlobHint("funded-btc-in", "funded_btc");
     }
   } catch (err) {
     console.error("resume failed:", err);
-    alert("Resume failed: " + err.message);
+    showToast("Resume failed: " + err.message, "error");
   }
 })();

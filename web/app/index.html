@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<!--
+  Defense-in-depth CSP. All scripts + styles are self-hosted; the only
+  outbound traffic is the two chain indexers we explicitly allowlist.
+  If a meta CSP conflicts with a server-set header, the intersection wins —
+  this is the floor, not the ceiling.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://blockstream.info https://explorer.fistbump.org; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
 <title>Swap | Fistbump</title>
 <meta name="description" content="Trustless peer-to-peer atomic swaps between Bitcoin and Fistbump. No custody, no matching, no fees.">
 <link rel="icon" type="image/png" href="./favicon-96x96.png" sizes="96x96" />
@@ -15,16 +22,11 @@
 <link rel="preload" href="./fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="./fistbump.css">
 <link rel="stylesheet" href="./style.css">
-<script type="importmap">
-  {
-    "imports": {
-      "@noble/hashes/sha256": "https://esm.sh/@noble/hashes@1.5.0/sha256?bundle",
-      "@noble/hashes/sha3": "https://esm.sh/@noble/hashes@1.5.0/sha3?bundle",
-      "@scure/base": "https://esm.sh/@scure/base@1.1.9?bundle",
-      "@scure/btc-signer": "https://esm.sh/@scure/btc-signer@1.8.1?bundle"
-    }
-  }
-</script>
+<!--
+  No importmap: app.js now loads a self-hosted ESM bundle at
+  ./core/bundle.js that inlines @noble/hashes, @scure/base, and
+  @scure/btc-signer. Rebuild with `./build.sh` after changing core sources.
+-->
 </head>
 <body>
 
@@ -237,7 +239,8 @@
             are already on their way to the counterparty and trying to refund
             will just waste a tx fee.
           </p>
-          <button id="refund-btc" class="btn">Refund my BTC</button>
+          <button id="refund-btc" class="btn" disabled>Refund my BTC</button>
+          <p class="field-note" id="refund-btc-countdown"></p>
           <p class="field-note" id="refund-btc-status"></p>
         </div>
       </li>
@@ -278,6 +281,7 @@
         <div class="step-body">
           <textarea id="offer-blob-in" rows="3" class="blob" placeholder="Paste the blob from your counterparty"></textarea>
           <button id="process-offer" class="btn primary" disabled>Check the offer</button>
+          <p class="field-note" id="offer-status"></p>
           <div class="detail-card hidden" id="offer-summary"></div>
         </div>
       </li>
@@ -381,7 +385,8 @@
             FBC refund height has passed. Check the FBC tip on
             <a href="https://explorer.fistbump.org" target="_blank" rel="noreferrer">explorer.fistbump.org</a>.
           </p>
-          <button id="refund-fbc" class="btn">Refund my FBC</button>
+          <button id="refund-fbc" class="btn" disabled>Refund my FBC</button>
+          <p class="field-note" id="refund-fbc-countdown"></p>
           <p class="field-note" id="refund-fbc-status"></p>
         </div>
       </li>
@@ -442,6 +447,8 @@
     </p>
   </div>
 </footer>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
 <script type="module" src="./app.js"></script>
 <script>
