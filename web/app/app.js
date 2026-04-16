@@ -332,13 +332,30 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
     const addr = btcHTLCAddress(alice.btcScript, BTC_NETWORK);
     const txid = await window.unisat.sendBitcoin(addr, alice.offer.amount_btc);
     alice.btcFundedTxid = txid;
-    alice.btcFundedVout = 0;
+    // Unisat only returns the txid — it does not guarantee which output
+    // index is the HTLC. Fetch the tx from the explorer and scan outputs
+    // to find the one paying our P2WSH address.
+    let actualVout = 0;
+    try {
+      const txRes = await fetch(`${BTC_API}/tx/${txid}`);
+      if (txRes.ok) {
+        const txData = await txRes.json();
+        const idx = txData.vout.findIndex(
+          (o) => o.scriptpubkey_address === addr,
+        );
+        if (idx >= 0) actualVout = idx;
+      }
+    } catch {
+      // If fetch fails, fall back to 0 — the tx just broadcast so the
+      // indexer may not have it yet. Bob verifies script + amount anyway.
+    }
+    alice.btcFundedVout = actualVout;
     const fundedBlob = encodeBlob({
       version: 1,
       kind: "funded_btc",
       offer_id: alice.offerId,
       funding_txid: txid,
-      funding_vout: 0,
+      funding_vout: actualVout,
       funding_amount: alice.offer.amount_btc,
       witness_script_hex: toHex(alice.btcScript.scriptBytes),
     });
@@ -518,6 +535,13 @@ document.getElementById("process-offer").addEventListener("click", async () => {
     const raw = document.getElementById("offer-blob-in").value.trim();
     const offer = decodeBlob(raw);
     if (offer.kind !== "offer") throw new Error("not an offer blob");
+    if (offer.fbc_refund_height <= offer.btc_refund_height) {
+      throw new Error(
+        "UNSAFE OFFER — FBC refund height (" + offer.fbc_refund_height +
+        ") must be greater than BTC refund height (" + offer.btc_refund_height +
+        "). Reject this offer.",
+      );
+    }
     bob.offer = offer;
 
     const summary = document.getElementById("offer-summary");

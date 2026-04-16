@@ -64,6 +64,10 @@ export function htlcsFromOfferAccept(offer, accept) {
     if (offer.offer_id !== accept.offer_id) {
         throw new Error("accept.offer_id does not match offer.offer_id");
     }
+    if (offer.fbc_refund_height <= offer.btc_refund_height) {
+        throw new Error("unsafe offer: FBC refund height must exceed BTC refund height " +
+            "(otherwise Alice can claim FBC and then refund her BTC, taking both sides)");
+    }
     const hashlock = fromHex(offer.hashlock);
     return {
         btc: {
