@@ -334,16 +334,6 @@ body.nav-open { overflow: hidden; }
 }
 .btn.primary:disabled:hover { background: var(--fb-accent); border-color: var(--fb-accent); color: #fff; }
 
-/* ── Button spacing inside step bodies ── */
-.step-body textarea + .btn,
-.step-body textarea + div > .btn,
-.step-body input + .btn,
-.step-body input + div > .btn,
-.step-body .detail-card + .btn,
-.step-body .field-note + .btn {
-  margin-top: var(--fb-space-md);
-}
-
 /* ── Blob panels ── */
 .blob-panel {
   display: flex; flex-direction: column;
