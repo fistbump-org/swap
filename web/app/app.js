@@ -664,14 +664,20 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
       funding_amount: alice.offer.amount_btc,
       witness_script_hex: toHex(alice.btcScript.scriptBytes),
     });
-    await navigator.clipboard.writeText(fundedBlob);
+    // Clipboard writes can fail if the wallet popup stole focus from this
+    // tab ("Document is not focused"). The blob is already on-chain, so this
+    // MUST NOT abort the rest of the flow — share block and state persistence
+    // below are what Alice actually needs to continue.
+    const copied = await navigator.clipboard.writeText(fundedBlob).then(() => true, () => false);
     renderTxStatus(statusEl, {
       label: "BTC funding broadcast.",
       txid,
       chain: "btc",
-      followup: "funded_btc blob copied to your clipboard — send it to your counterparty.",
+      followup: copied
+        ? "funded_btc blob copied to your clipboard — send it to your counterparty."
+        : "Send the funded_btc blob below to your counterparty — use the Copy button (auto-copy failed, likely because your wallet popup took focus).",
     });
-    showToast("funded_btc blob copied to clipboard", "ok");
+    if (copied) showToast("funded_btc blob copied to clipboard", "ok");
     appendShareBlock(statusEl, fundedBlob, "funded_btc");
     document.getElementById("claim-fbc").disabled = false;
 
@@ -979,14 +985,20 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       funding_amount: bob.offer.amount_fbc,
       witness_script_hex: toHex(bob.fbcScript.scriptBytes),
     });
-    await navigator.clipboard.writeText(fundedFbcBlob);
+    // Clipboard writes can fail if the wallet popup stole focus from this
+    // tab ("Document is not focused"). FBC is already on-chain, so this
+    // MUST NOT abort the rest of the flow — share block and state persistence
+    // below are what Bob actually needs to continue.
+    const copied = await navigator.clipboard.writeText(fundedFbcBlob).then(() => true, () => false);
     renderTxStatus(statusEl, {
       label: "FBC HTLC funded.",
       txid: res.txid,
       chain: "fbc",
-      followup: "funded_fbc blob copied to your clipboard — send it to your counterparty.",
+      followup: copied
+        ? "funded_fbc blob copied to your clipboard — send it to your counterparty."
+        : "Send the funded_fbc blob below to your counterparty — use the Copy button (auto-copy failed, likely because your wallet popup took focus).",
     });
-    showToast("funded_fbc blob copied to clipboard", "ok");
+    if (copied) showToast("funded_fbc blob copied to clipboard", "ok");
     appendShareBlock(statusEl, fundedFbcBlob, "funded_fbc");
 
     // claim-btc stays disabled until either (a) user pastes preimage
