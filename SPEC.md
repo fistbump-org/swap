@@ -391,7 +391,7 @@ Lessons from the first mainnet swap (2026-04-15):
 3. **BTC claim fee floor** of 3 sat/vB is enforced. Below 1 sat/vB, Bitcoin Core nodes refuse to relay and the claim can stall indefinitely. Claims also signal BIP 125 RBF (`nSequence = 0xFFFFFFFD`) so fees can be bumped if needed.
 4. **BTC funding vout** must be detected from on-chain data, not assumed to be 0. Wallet coin-selection output ordering is not guaranteed.
 5. **FBC claim broadcast** must be chained with signing. The wallet extension's `signHtlcSpend` signs AND broadcasts atomically; if broadcast fails, the signed tx hex is returned so the caller can retry.
-6. **Bob MUST validate `T2 > T1`** before funding. Without this, Alice can claim FBC and then refund her BTC, taking both sides. Enforced in both the core library and the frontend.
+6. **Bob MUST validate `T2 > T1` in wall-clock time** (§4.2) before funding — compare `(T2 − fbc_ref) × 120s` against `(T1 − btc_ref) × 600s`, not raw heights. Without this, Alice can claim FBC and then refund her BTC, taking both sides. Enforced in both the core library and the frontend.
 7. **Blockstream Esplora** (`blockstream.info/api`) is used for BTC tip height, fee estimates, and broadcast. Explorer links use 3xpl.com.
 
 ---

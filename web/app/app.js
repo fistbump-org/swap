@@ -219,14 +219,9 @@ function validateOffer(offer, observed) {
       reason: `amount_fbc must be ≥ ${MIN_AMOUNT_FBC_DOLLARYDOOS.toLocaleString()} dollarydoos (1 FBC)`,
     };
   }
-  if (offer.fbc_refund_height <= offer.btc_refund_height) {
-    return {
-      ok: false,
-      reason: "unsafe offer: FBC refund height must exceed BTC refund height",
-    };
-  }
-  // Wall-clock buffer check: (T2 − btc_ref) * FBC_BLOCK − (T1 − btc_ref) * BTC_BLOCK
-  // is the approximate clock-time delta between refund paths at broadcast.
+  // Safety buffer (SPEC §4.2): T2 - T1 in wall-clock seconds, computed from
+  // each chain's own reference tip. Raw-height comparison would be meaningless
+  // since BTC and FBC heights advance on independent chains.
   const btcSecondsToT1 = (offer.btc_refund_height - offer.btc_reference_height) * BTC_BLOCK_SECONDS;
   const fbcSecondsToT2 = (offer.fbc_refund_height - offer.fbc_reference_height) * FBC_BLOCK_SECONDS;
   const deltaHours = (fbcSecondsToT2 - btcSecondsToT1) / 3600;

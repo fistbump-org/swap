@@ -10,6 +10,12 @@ import { base64urlnopad } from "@scure/base";
 import { fromHex, toHex } from "./hex.js";
 import { buildHTLCScript, parseHTLCScript } from "./script.js";
 const ENVELOPE_PREFIX = "fistbump-swap:v1:";
+// Protocol block targets (SPEC §4.2). BTC and FBC heights aren't directly
+// comparable — they advance on independent chains at different rates — so the
+// T2 > T1 safety check must be done in wall-clock seconds relative to each
+// chain's reference tip.
+const BTC_BLOCK_SECONDS = 600;
+const FBC_BLOCK_SECONDS = 120;
 export function encodeBlob(blob) {
     const json = JSON.stringify(blob);
     const bytes = new TextEncoder().encode(json);
@@ -64,8 +70,10 @@ export function htlcsFromOfferAccept(offer, accept) {
     if (offer.offer_id !== accept.offer_id) {
         throw new Error("accept.offer_id does not match offer.offer_id");
     }
-    if (offer.fbc_refund_height <= offer.btc_refund_height) {
-        throw new Error("unsafe offer: FBC refund height must exceed BTC refund height " +
+    const btcSecondsToT1 = (offer.btc_refund_height - offer.btc_reference_height) * BTC_BLOCK_SECONDS;
+    const fbcSecondsToT2 = (offer.fbc_refund_height - offer.fbc_reference_height) * FBC_BLOCK_SECONDS;
+    if (fbcSecondsToT2 <= btcSecondsToT1) {
+        throw new Error("unsafe offer: FBC refund must expire later than BTC refund in wall-clock time " +
             "(otherwise Alice can claim FBC and then refund her BTC, taking both sides)");
     }
     const hashlock = fromHex(offer.hashlock);
