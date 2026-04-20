@@ -664,20 +664,12 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
       funding_amount: alice.offer.amount_btc,
       witness_script_hex: toHex(alice.btcScript.scriptBytes),
     });
-    // Clipboard writes can fail if the wallet popup stole focus from this
-    // tab ("Document is not focused"). The blob is already on-chain, so this
-    // MUST NOT abort the rest of the flow — share block and state persistence
-    // below are what Alice actually needs to continue.
-    const copied = await navigator.clipboard.writeText(fundedBlob).then(() => true, () => false);
     renderTxStatus(statusEl, {
       label: "BTC funding broadcast.",
       txid,
       chain: "btc",
-      followup: copied
-        ? "funded_btc blob copied to your clipboard — send it to your counterparty."
-        : "Send the funded_btc blob below to your counterparty — use the Copy button (auto-copy failed, likely because your wallet popup took focus).",
+      followup: "Use Copy blob / Copy link / Show QR below to send the funded_btc envelope to your counterparty.",
     });
-    if (copied) showToast("funded_btc blob copied to clipboard", "ok");
     appendShareBlock(statusEl, fundedBlob, "funded_btc");
     document.getElementById("claim-fbc").disabled = false;
 
@@ -985,20 +977,12 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
       funding_amount: bob.offer.amount_fbc,
       witness_script_hex: toHex(bob.fbcScript.scriptBytes),
     });
-    // Clipboard writes can fail if the wallet popup stole focus from this
-    // tab ("Document is not focused"). FBC is already on-chain, so this
-    // MUST NOT abort the rest of the flow — share block and state persistence
-    // below are what Bob actually needs to continue.
-    const copied = await navigator.clipboard.writeText(fundedFbcBlob).then(() => true, () => false);
     renderTxStatus(statusEl, {
       label: "FBC HTLC funded.",
       txid: res.txid,
       chain: "fbc",
-      followup: copied
-        ? "funded_fbc blob copied to your clipboard — send it to your counterparty."
-        : "Send the funded_fbc blob below to your counterparty — use the Copy button (auto-copy failed, likely because your wallet popup took focus).",
+      followup: "Use Copy blob / Copy link / Show QR below to send the funded_fbc envelope to your counterparty.",
     });
-    if (copied) showToast("funded_fbc blob copied to clipboard", "ok");
     appendShareBlock(statusEl, fundedFbcBlob, "funded_fbc");
 
     // claim-btc stays disabled until either (a) user pastes preimage
@@ -1317,10 +1301,27 @@ function appendShareBlock(statusEl, envelope, kind) {
   if (!statusEl || !envelope) return;
   statusEl.querySelector(".share-buttons")?.remove();
   statusEl.querySelector(".qr-wrap")?.remove();
+  statusEl.querySelector(".funded-envelope")?.remove();
   const wrap = document.createElement("div");
   wrap.style.cssText = "margin-top:10px;";
   statusEl.appendChild(wrap);
-  wireShareButtons(wrap, () => envelope, { label: `${kind} link` });
+
+  // Render the raw envelope read-only so the user can fall back to manual
+  // select/copy if clipboard is blocked by the browser or a focus glitch.
+  const ta = document.createElement("textarea");
+  ta.className = "funded-envelope";
+  ta.readOnly = true;
+  ta.value = envelope;
+  ta.rows = 2;
+  ta.style.cssText = "width:100%;font-family:monospace;font-size:11px;margin-top:6px;";
+  ta.addEventListener("focus", () => ta.select());
+  wrap.appendChild(ta);
+
+  wireShareButtons(wrap, () => envelope, {
+    label: `${kind} link`,
+    includeBlobCopy: true,
+    blobLabel: kind,
+  });
 }
 
 // Attach a "Show QR" + "Copy link" button pair to an existing blob panel.
@@ -1334,15 +1335,37 @@ function wireShareButtons(panelEl, getEnvelope, opts = {}) {
   row.className = "share-buttons";
   row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;";
 
+  if (opts.includeBlobCopy) {
+    const blobBtn = document.createElement("button");
+    blobBtn.type = "button";
+    blobBtn.className = "btn";
+    blobBtn.textContent = "Copy blob";
+    blobBtn.addEventListener("click", async () => {
+      const env = getEnvelope();
+      if (!env) return;
+      try {
+        await navigator.clipboard.writeText(env);
+        showToast(`${opts.blobLabel || "Blob"} copied to clipboard`, "ok");
+      } catch {
+        showToast("Clipboard unavailable — long-press/select the envelope below to copy manually", "error");
+      }
+    });
+    row.appendChild(blobBtn);
+  }
+
   const linkBtn = document.createElement("button");
   linkBtn.type = "button";
   linkBtn.className = "btn";
   linkBtn.textContent = "Copy link";
-  linkBtn.addEventListener("click", () => {
+  linkBtn.addEventListener("click", async () => {
     const env = getEnvelope();
     if (!env) return;
-    navigator.clipboard.writeText(buildShareLink(env));
-    showToast(`${opts.label || "Link"} copied — they can paste it straight into their browser`, "ok");
+    try {
+      await navigator.clipboard.writeText(buildShareLink(env));
+      showToast(`${opts.label || "Link"} copied — they can paste it straight into their browser`, "ok");
+    } catch {
+      showToast("Clipboard unavailable — use Show QR instead", "error");
+    }
   });
   row.appendChild(linkBtn);
 
