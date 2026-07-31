@@ -545,9 +545,7 @@ def _list_makers() -> list[dict[str, Any]]:
                     # — so a bare `side` on a maker record reads as the exact
                     # opposite of the truth: a maker listed as "buy_fbc" SELLS
                     # FBC. The perspective is in the name now.
-                    "taker_sides": rec.get("side") or ["buy_fbc"],
-                    # Deprecated alias, so an existing client keeps working.
-                    "side": rec.get("side") or ["buy_fbc"],
+                    "taker_sides": rec.get("taker_sides") or rec.get("side") or ["buy_fbc"],
                     "note": rec.get("note") or "",
                     "protocol": rec.get("protocol") or "fistbump-swap-mm/v1",
                     "last_seen": rec.get("last_seen"),
@@ -779,7 +777,7 @@ def _announce(body: dict[str, Any], client_ip: str, token: str) -> dict[str, Any
         _store[url] = {
             "name": name,
             "url": url,
-            "side": side,
+            "taker_sides": side,
             "note": note,
             "protocol": protocol,
             "last_seen": _now(),

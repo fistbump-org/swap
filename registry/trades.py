@@ -247,9 +247,8 @@ class TradeStore:
                 "amount_fbc": r["amount_fbc_bumps"] / BUMPS_PER_FBC,
                 "fbc_per_btc": _rate(r["amount_btc_sat"], r["amount_fbc_bumps"]),
                 "fbc_usd": _fbc_usd(r["amount_btc_sat"], r["amount_fbc_bumps"], r["btc_usd"]),
-                # Whose side: the taker's. See the note in registry.py.
+                # Whose side: the taker's. The name carries the perspective.
                 "taker_side": r["side"],
-                "side": r["side"],
                 # The maker is named, but no txids are published. The registry
                 # needs them to verify; a reader does not, and publishing them
                 # links the maker's and takers' addresses together in a way the

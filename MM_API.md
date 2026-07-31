@@ -50,7 +50,6 @@ Bots self-register so UIs do not require pasting URLs. The registry is a **phone
 | `POST` | `{registry}/v1/makers/announce` | Register / heartbeat |
 
 **Announce body:** `{ "url", "name", "taker_sides", "protocol", "note?" }`
-(`side` is still accepted as the old name for `taker_sides`.)
 
 Announcing requires **proof that you control the URL you are claiming**. The UI auto-selects the best-priced maker for anyone who has not used it before, so getting listed is being trusted with a stranger's funds — an open announce endpoint lets anybody put themselves in that position.
 
@@ -82,7 +81,7 @@ Liveness. May include the same fields as `/v1/status`.
 ```json
 {
   "ok": true,
-  "side": "buy_fbc",
+  "taker_sides": ["buy_fbc"],
   "liquidity": "fbc",
   "protocol": "fistbump-swap-mm/v1"
 }
@@ -100,8 +99,6 @@ Public maker metadata for UIs.
 {
   "protocol": "fistbump-swap-mm/v1",
   "taker_sides": ["buy_fbc"],
-  "side": "buy_fbc",
-  "sides": ["buy_fbc"],
   "liquidity": "fbc",
   "name": "optional display name",
   "announce_id": "…sha256(ANNOUNCE_TOKEN), 64 hex…",
@@ -119,7 +116,6 @@ Public maker metadata for UIs.
 |--------|---------|
 | `taker_sides` | Every side you serve, as a list, **named from the taker's point of view** — which is the only view `Side` has. This is the field to read. `buy_fbc` = the taker pays BTC and receives FBC, so **you supply FBC**. `sell_fbc` = the taker pays FBC and receives BTC, so you supply BTC. A maker may serve one or both. |
 | `liquidity` | What you actually hold and hand out — `fbc` or `btc`. The maker-relative fact, and the one to read if you want to know what a maker *is*. |
-| `sides`, `side` | Deprecated names for `taker_sides`. Kept so older clients keep working; do not use them in new code. A maker listed as `side: "buy_fbc"` **sells** FBC, which is exactly the confusion the rename removes. |
 | `liquidity` | What inventory you advertise (`fbc`, `btc`, or `both`). |
 | `mid_fbc_per_btc` | Whole FBC per whole BTC (a price). The example means 1 BTC ≈ 42,000 FBC. |
 | `spread_bps` | Your half-spread in basis points (informational). |
@@ -150,8 +146,11 @@ Request a firm quote. Locks soft inventory for `expires_at` if you implement inv
 `side` is **required**. It was optional in earlier drafts, which meant an absent side
 silently meant `buy_fbc` — harmless while that was the only side, and a wrong-chain spend
 the moment it is not. A request without one gets `400 side is required`, never a guess.
-Read `sides` from `GET /v1/status` to learn what a maker actually serves; `side` (singular)
-is the older single-valued spelling of the same fact.
+Read `taker_sides` from `GET /v1/status` to learn what a maker serves. Note the
+asymmetry, which is deliberate: on a maker's record the field is named for whose
+view it is, because "buy_fbc" on a maker reads as the opposite of the truth — a
+maker serving `buy_fbc` **sells** FBC. In a quote request there is no such
+ambiguity, since the taker is naming their own action, so the field stays `side`.
 
 **Request** — `amount_sat` is integer **sats**, the amount the taker pays:
 
