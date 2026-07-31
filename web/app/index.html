@@ -4,31 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <!--
-  Defense-in-depth CSP. All scripts + styles are self-hosted; the only
-  outbound traffic is the two chain indexers we explicitly allowlist.
-  If a meta CSP conflicts with a server-set header, the intersection wins —
-  this is the floor, not the ceiling.
+  connect-src is deliberately any-https: makers are independent principals listed
+  in a directory (MM_API.md), so the set of origins this page talks to is not
+  known at build time. Loopback http is for a maker running locally (bot/ binds
+  127.0.0.1 by default) and for the local registry.
+  script-src has no 'unsafe-inline': every script on this page is an external
+  file. Keep it that way — inline <script> or on* attributes will silently break.
+  frame-ancestors CANNOT live here: browsers ignore it in a <meta> CSP. It has to
+  be sent by the web server as a `Content-Security-Policy: frame-ancestors 'none'`
+  response header (plus `X-Frame-Options: DENY` for old clients). Until the vhost
+  serving this directory does that, the page is frameable.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://blockstream.info https://explorer.fistbump.org; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https: http://127.0.0.1:* http://localhost:* http://[::1]:*; base-uri 'self'; form-action 'self'">
 <title>Swap | Fistbump</title>
-<meta name="description" content="Trustless peer-to-peer atomic swaps between Bitcoin and Fistbump. No custody, no matching, no fees.">
-<link rel="icon" type="image/png" href="./favicon-96x96.png" sizes="96x96" />
-<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-<link rel="shortcut icon" href="./favicon.ico" />
-<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
-<link rel="manifest" href="./site.webmanifest" />
+<meta name="description" content="Buy FBC with BTC via automated atomic swap.">
+<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="shortcut icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/site.webmanifest" />
 <meta name="apple-mobile-web-app-title" content="Fistbump Swap" />
-<link rel="preload" href="./fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="./fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="./fistbump.css">
-<link rel="stylesheet" href="./style.css">
-<!--
-  No importmap: app.js now loads a self-hosted ESM bundle at
-  ./core/bundle.js that inlines @noble/hashes, @scure/base, and
-  @scure/btc-signer. Rebuild with `./build.sh` after changing core sources.
--->
+<link rel="preload" href="/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibm-plex-mono-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/fistbump.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/auto/style.css">
 </head>
-<body>
+<body class="auto-page">
 
 <header class="header">
   <div class="container header-inner">
@@ -42,10 +44,7 @@
       <span class="logo-text">Fistbump</span>
     </a>
     <nav class="nav">
-      <a href="https://fistbump.org">Home</a>
-      <a href="https://fbd.dev">Docs</a>
-      <a href="https://explorer.fistbump.org">Explorer</a>
-      <a href="#how">How it works</a>
+      <a href="/p2p/">P2P</a>
     </nav>
     <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -54,420 +53,179 @@
 </header>
 
 <nav class="mobile-nav" id="mobileNav">
-  <a href="https://fistbump.org">Home</a>
-  <a href="https://fbd.dev">Docs</a>
-  <a href="https://explorer.fistbump.org">Explorer</a>
-  <a href="#how">How it works</a>
+  <a href="/p2p/">P2P</a>
 </nav>
 
-<main>
+<main class="auto-main">
+  <div class="auto-center">
 
-<!-- ▬▬ Hero ▬▬ -->
-<section class="hero">
-  <div class="hero-grid"></div>
-  <div class="hero-glow"></div>
-  <div class="hero-glow-2"></div>
-  <div class="container hero-content">
-    <p class="hero-badge">Atomic swaps · non-custodial</p>
-    <h1 class="hero-title">Swap BTC and FBC,<br>peer to peer</h1>
-    <p class="hero-sub">
-      Two people, two wallets, two blockchains, one <abbr title="A 32-byte secret that only Alice knows at the start. Revealing it on one chain makes it public on both — which is what makes the swap atomic.">preimage</abbr>. No custody, no
-      middleman, no fees — just the scripts each chain already understands.
-    </p>
-    <p class="hero-req">Requires <a href="https://fistbump.org/#software">wallet</a> v0.2.2+ and <a href="https://fistbump.org/#software">extension</a> v0.2.0+.</p>
-    <div class="role-switch" role="tablist" aria-label="Your side of the swap">
-      <button id="role-alice" class="role-btn" role="tab" aria-selected="true" data-role="alice">
-        <span class="role-title">I have BTC</span>
-        <span class="role-sub">I want FBC</span>
-      </button>
-      <button id="role-bob" class="role-btn" role="tab" aria-selected="false" data-role="bob">
-        <span class="role-title">I have FBC</span>
-        <span class="role-sub">I want BTC</span>
+    <!-- An active swap is time-sensitive: it has timelocks, and someone who
+         closed the tab and came back must see it without hunting. It gets a
+         callout here when one exists and renders nothing when none does. The
+         Activity tab still holds the full list. -->
+    <button type="button" class="resume-callout hidden" id="resume-callout">
+      <span class="resume-dot" aria-hidden="true"></span>
+      <span class="resume-text" id="resume-text">1 swap in progress</span>
+      <span class="resume-go" aria-hidden="true">Resume →</span>
+    </button>
+
+    <div class="swap-card" id="swap-card">
+
+      <!-- Verified market data: every figure comes from swaps the registry
+           checked against BOTH chains — amounts, the spends, and the shared
+           preimage proving the two legs are one atomic swap. Hidden until a
+           real trade exists; an empty price above a Swap button reads as the
+           swap being broken. -->
+      <header class="price-header hidden" id="market-card">
+        <div class="price-label">FBC price</div>
+        <div class="price-main">
+          <span class="price-usd" id="market-usd">—</span>
+          <span class="price-unit">USD</span>
+        </div>
+        <!-- Kept in the DOM, not shown: refreshMarket writes to them and
+             they are the natural home for this detail if it earns a place
+             back. Removing the elements would mean editing the fetch too. -->
+        <span class="visually-hidden" id="market-perbtc">—</span>
+        <span class="visually-hidden" id="market-sub">—</span>
+      </header>
+
+      <div class="amount-block">
+        <label class="amount-label" for="amount-in">
+          <span id="amount-in-label">You pay</span>
+          <span class="amount-asset">BTC</span>
+        </label>
+        <div class="amount-row">
+          <input type="text" id="amount-in" inputmode="decimal" value="0.001" autocomplete="off" spellcheck="false" aria-label="Amount to pay in BTC">
+          <div class="amount-chip">BTC</div>
+        </div>
+        <p class="field-hint" id="amount-hint"></p>
+      </div>
+
+      <div class="swap-arrow" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+          <path d="M10 3v14M10 17l-4-4M10 17l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <div class="amount-block receive">
+        <div class="amount-label">
+          <span>You receive</span>
+          <span class="amount-asset">FBC</span>
+        </div>
+        <div class="amount-row">
+          <input type="text" id="amount-out" inputmode="decimal" placeholder="0" autocomplete="off" spellcheck="false" aria-label="Amount to receive in FBC">
+          <div class="amount-chip">FBC</div>
+        </div>
+        <!-- Only shown when an FBC target cannot be hit exactly. Satoshis are
+             whole numbers, so a target lands between two of them and the
+             amount is rounded up; without saying so, the difference only
+             appears when the BTC field is next touched and reads as a bug. -->
+        <p class="field-hint" id="receive-hint"></p>
+      </div>
+
+      <div class="quote-terms">
+        <span class="mono" id="quote-rate">—</span>
+        <span class="quote-terms-right">
+          via <button type="button" class="via-btn" id="quote-via" title="Choose a different liquidity provider">—</button>
+          <span class="price-dot">·</span>
+          <span class="mono" id="quote-expires">—</span>
+        </span>
+      </div>
+      <span class="visually-hidden" id="quote-spread">—</span>
+
+      <button type="button" class="btn primary swap-cta" id="swap-btn" disabled>Getting quote…</button>
+    </div>
+
+    <!-- Secondary content. Full width, and each panel gets real room rather
+         than being squeezed into a drawer inside the card. -->
+    <div class="tabs" role="tablist" aria-label="Details">
+      <button type="button" class="tab" id="tab-market" role="tab" aria-selected="true" aria-controls="panel-market">Market</button>
+      <button type="button" class="tab" id="tab-liquidity" role="tab" aria-selected="false" aria-controls="panel-liquidity">Liquidity</button>
+      <button type="button" class="tab" id="tab-activity" role="tab" aria-selected="false" aria-controls="panel-activity">
+        Activity <span class="tab-count hidden" id="tab-activity-count"></span>
       </button>
     </div>
-  </div>
-</section>
 
-<!-- ▬▬ Flow: Alice ▬▬ -->
-<section class="flow" id="flow-alice">
-  <div class="container">
-    <ol class="steps">
-      <li class="step" data-step="1">
-        <div class="step-header">
-          <span class="step-number">1</span>
-          <h2 class="step-title">Connect your wallets</h2>
-        </div>
-        <div class="step-body">
-          <div class="wallet-row">
-            <div class="wallet">
-              <div class="wallet-label">Bitcoin</div>
-              <button id="btc-connect" class="btn">Connect Unisat</button>
-              <div class="wallet-status" id="btc-status">not connected</div>
-            </div>
-            <div class="wallet">
-              <div class="wallet-label">Fistbump</div>
-              <button id="fbc-connect" class="btn">Connect Fistbump</button>
-              <div class="wallet-status" id="fbc-status">not connected</div>
-            </div>
-          </div>
-        </div>
-      </li>
+    <div class="tabpanel" id="panel-market" role="tabpanel" aria-labelledby="tab-market">
+      <div class="market-trades" id="market-trades"></div>
+      <p class="market-note" id="market-history-summary">
+        Each priced row is a swap that settled on both chains. The registry
+        checked the amounts, that each funding output was spent by the claim
+        named, and that one preimage satisfies the hashlock in <em>both</em>
+        witness scripts — all read from BTC and FBC directly, never from the
+        maker. USD uses the BTC rate from the minute each swap settled.
+        A row marked <em>settling</em> has been claimed on chain but is not yet
+        buried deep enough to count, so it carries no price.
+      </p>
+    </div>
 
-      <li class="step" data-step="2">
-        <div class="step-header">
-          <span class="step-number">2</span>
-          <h2 class="step-title">Set the terms</h2>
-        </div>
-        <div class="step-body">
-          <div class="field-row">
-            <label>
-              <span class="field-label">You send</span>
-              <div class="input-with-unit">
-                <input id="amount-btc" type="number" min="0" step="0.00000001" placeholder="0.00100000" />
-                <span class="unit">BTC</span>
-              </div>
-            </label>
-            <label>
-              <span class="field-label">You receive</span>
-              <div class="input-with-unit">
-                <input id="amount-fbc" type="number" min="0" step="0.000001" placeholder="10.000000" />
-                <span class="unit">FBC</span>
-              </div>
-            </label>
-          </div>
-          <div class="field-row">
-            <label>
-              <span class="field-label">BTC refund window</span>
-              <div class="input-with-unit">
-                <input id="btc-hours" type="number" min="1" max="168" value="24" />
-                <span class="unit">hours</span>
-              </div>
-            </label>
-            <label>
-              <span class="field-label">FBC refund window</span>
-              <div class="input-with-unit">
-                <input id="fbc-hours" type="number" min="2" max="336" value="48" />
-                <span class="unit">hours</span>
-              </div>
-            </label>
-          </div>
-          <p class="field-note" id="timelock-note"></p>
-          <button id="build-offer" class="btn primary" disabled>Generate offer</button>
-        </div>
-      </li>
-
-      <li class="step" data-step="3">
-        <div class="step-header">
-          <span class="step-number">3</span>
-          <h2 class="step-title">Send this to your counterparty</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Copy this line to your counterparty — Signal, email, whatever you
-            use. It is just public data: <abbr title="SHA-256 of the preimage. Shared openly; only the preimage itself is secret.">hashlock</abbr>, your pubkeys, amounts, and
-            the two <abbr title="Absolute block heights. Until these blocks are reached, only the counterparty with the preimage can spend. After, you can reclaim your funds.">refund heights</abbr>.
-          </p>
-          <div class="blob-panel">
-            <textarea id="offer-blob" readonly rows="5" class="blob" placeholder="Your offer blob will appear here…"></textarea>
-            <button id="copy-offer" class="btn">Copy</button>
-          </div>
-          <details class="reveal-details">
-            <summary>Show parsed offer</summary>
-            <pre id="offer-json"></pre>
-          </details>
-        </div>
-      </li>
-
-      <li class="step" data-step="4">
-        <div class="step-header">
-          <span class="step-number">4</span>
-          <h2 class="step-title">Paste their accept back here</h2>
-        </div>
-        <div class="step-body">
-          <textarea id="accept-blob-in" rows="3" class="blob" placeholder="Paste the blob from your counterparty"></textarea>
-          <button id="process-accept" class="btn primary" disabled>Verify and continue</button>
-          <p class="field-note" id="accept-status"></p>
-        </div>
-      </li>
-
-      <li class="step" data-step="5">
-        <div class="step-header">
-          <span class="step-number">5</span>
-          <h2 class="step-title">Fund your BTC HTLC</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Your wallet will build a standard segwit transaction that locks the
-            BTC into an <abbr title="Hash Time-Locked Contract: a script that resolves either to the recipient who reveals the preimage, or back to the sender after a timelock deadline.">HTLC</abbr> that only resolves to <em>them with your preimage</em>
-            or <em>you after the refund height</em>. No one else can touch it.
-          </p>
-          <div class="detail-card" id="btc-fund-summary"></div>
-          <button id="fund-btc" class="btn primary" disabled>Fund BTC HTLC</button>
-          <p class="field-note" id="btc-fund-status"></p>
-        </div>
-      </li>
-
-      <li class="step" data-step="6">
-        <div class="step-header">
-          <span class="step-number">6</span>
-          <h2 class="step-title">Wait for them to fund FBC, then claim</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Once the counterparty funds the FBC side, your wallet will claim it
-            by broadcasting a transaction that reveals your <abbr title="The 32-byte secret you generated in Step 2. Revealing it on FBC makes it public — the counterparty uses that same value to claim your BTC.">preimage</abbr>. The reveal
-            is what lets the counterparty unlock the BTC you posted — that's
-            the atomic part.
-          </p>
-          <textarea id="funded-fbc-in" rows="3" class="blob" placeholder="Paste the funded_fbc blob from your counterparty"></textarea>
-          <button id="claim-fbc" class="btn primary" disabled>Claim my FBC</button>
-          <p class="field-note" id="claim-status"></p>
-        </div>
-      </li>
-
-      <li class="step" data-step="7">
-        <div class="step-header">
-          <span class="step-number">7</span>
-          <h2 class="step-title">If something went wrong — refund your BTC</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Only use this if the counterparty never funded their FBC HTLC and
-            the BTC refund height has passed. You can check the current BTC
-            tip on <a href="https://3xpl.com/bitcoin" target="_blank" rel="noreferrer">3xpl.com</a>.
-            Don't touch this if you already claimed FBC in step 6 — your funds
-            are already on their way to the counterparty and trying to refund
-            will just waste a tx fee.
-          </p>
-          <button id="refund-btc" class="btn" disabled>Refund my BTC</button>
-          <p class="field-note" id="refund-btc-countdown"></p>
-          <p class="field-note" id="refund-btc-status"></p>
-        </div>
-      </li>
-    </ol>
-  </div>
-</section>
-
-<!-- ▬▬ Flow: Bob ▬▬ -->
-<section class="flow hidden" id="flow-bob">
-  <div class="container">
-    <ol class="steps">
-      <li class="step" data-step="1">
-        <div class="step-header">
-          <span class="step-number">1</span>
-          <h2 class="step-title">Connect your wallets</h2>
-        </div>
-        <div class="step-body">
-          <div class="wallet-row">
-            <div class="wallet">
-              <div class="wallet-label">Fistbump</div>
-              <button id="fbc-connect-bob" class="btn">Connect Fistbump</button>
-              <div class="wallet-status" id="fbc-status-bob">not connected</div>
-            </div>
-            <div class="wallet">
-              <div class="wallet-label">Bitcoin</div>
-              <button id="btc-connect-bob" class="btn">Connect Unisat</button>
-              <div class="wallet-status" id="btc-status-bob">not connected</div>
-            </div>
-          </div>
-        </div>
-      </li>
-
-      <li class="step" data-step="2">
-        <div class="step-header">
-          <span class="step-number">2</span>
-          <h2 class="step-title">Paste the offer they sent you</h2>
-        </div>
-        <div class="step-body">
-          <textarea id="offer-blob-in" rows="3" class="blob" placeholder="Paste the blob from your counterparty"></textarea>
-          <button id="process-offer" class="btn primary" disabled>Check the offer</button>
-          <p class="field-note" id="offer-status"></p>
-          <div class="detail-card hidden" id="offer-summary"></div>
-        </div>
-      </li>
-
-      <li class="step" data-step="3">
-        <div class="step-header">
-          <span class="step-number">3</span>
-          <h2 class="step-title">Send them your accept</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Your accept just contains your two pubkeys — that's everything the
-            counterparty needs to reconstruct the <abbr title="The HTLC script. Both parties build it independently from the same parameters; if they don't match byte-for-byte, one party will detect the mismatch before funding.">scripts</abbr> independently.
-          </p>
-          <div class="blob-panel">
-            <textarea id="accept-blob" readonly rows="3" class="blob" placeholder="Your accept will appear here…"></textarea>
-            <button id="copy-accept" class="btn">Copy</button>
-          </div>
-        </div>
-      </li>
-
-      <li class="step" data-step="4">
-        <div class="step-header">
-          <span class="step-number">4</span>
-          <h2 class="step-title">Wait for their BTC funding, then fund FBC</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Never fund FBC before you've verified their BTC <abbr title="Hash Time-Locked Contract: the script that locks the BTC until either the recipient reveals the preimage or the timelock expires.">HTLC</abbr> has confirmed
-            to at least 6 blocks. If they haven't funded, the worst case is you've
-            wasted time — but if you fund first and they never do, your FBC is
-            stuck until the <abbr title="The absolute block height after which you can reclaim your funds via the refund branch.">timelock</abbr>.
-          </p>
-          <textarea id="funded-btc-in" rows="3" class="blob" placeholder="Paste the funded_btc blob from your counterparty"></textarea>
-          <button id="fund-fbc" class="btn primary" disabled>Fund FBC HTLC</button>
-          <p class="field-note" id="fbc-fund-status"></p>
-        </div>
-      </li>
-
-      <li class="step" data-step="5">
-        <div class="step-header">
-          <span class="step-number">5</span>
-          <h2 class="step-title">Claim your BTC once they reveal the preimage</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            After the counterparty claims their FBC, the <abbr title="The 32-byte secret. Once revealed on one chain, it's publicly readable — that's what makes the swap atomic.">preimage</abbr> is public in
-            that claim transaction's <abbr title="The data attached to a segwit spend that satisfies the script: signatures, the preimage, and the script itself.">witness</abbr>. Paste the preimage below (your
-            counterparty can share it, or you can read it off the FBC
-            explorer). Your wallet will then spend the BTC HTLC into your
-            Bitcoin address. <strong>Do this well before the BTC refund
-            height — if the counterparty refunds first, your FBC is gone.</strong>
-          </p>
-          <label class="field-label" for="preimage-in">Preimage (64 hex chars)</label>
-          <input id="preimage-in" class="blob" style="margin-bottom:var(--fb-space-md);" placeholder="Paste the 64-character hex preimage from Alice" />
-          <button id="claim-btc" class="btn primary" disabled>Claim my BTC</button>
-          <p class="field-note" id="claim-btc-status"></p>
-
-          <details class="reveal-details">
-            <summary>Sign externally (Sparrow, Electrum, etc.) if Unisat refuses</summary>
-            <p class="step-hint">
-              Some wallets (Unisat) don't sign P2WSH inputs with custom scripts.
-              If that's you: click <em>Export PSBT</em>, open Sparrow &rarr; File &rarr;
-              Load Transaction from Text, sign, copy the signed PSBT back below,
-              and hit <em>Finalize &amp; broadcast</em>. The preimage still needs
-              to be correct above.
-            </p>
-            <button id="export-psbt" class="btn">Export PSBT</button>
-            <textarea id="unsigned-psbt" readonly rows="3" class="blob" placeholder="Unsigned PSBT hex will appear here…"></textarea>
-
-            <p class="step-hint" style="margin-top:var(--fb-space-md);">
-              <strong>Or easier:</strong> paste your WIF private key here and we'll
-              sign + broadcast in-browser without touching any external wallet. The
-              key never leaves your tab; close it to discard. Export the WIF from
-              Unisat: Settings → Security → Export Private Key.
-            </p>
-            <label class="field-label" for="wif-in">Private key (WIF)</label>
-            <input id="wif-in" class="blob" type="password" placeholder="L… or K…" autocomplete="off" />
-            <button id="sign-with-wif" class="btn primary">Sign with WIF &amp; broadcast</button>
-
-            <p class="step-hint" style="margin-top:var(--fb-space-md);">
-              <strong>Or from Sparrow:</strong> sign the exported PSBT there, paste
-              the signed PSBT back:
-            </p>
-            <label class="field-label" for="signed-psbt-in">Signed PSBT hex</label>
-            <textarea id="signed-psbt-in" rows="3" class="blob" placeholder="70736274ff…"></textarea>
-            <button id="finalize-external" class="btn">Finalize &amp; broadcast</button>
-            <p class="field-note" id="external-status"></p>
-          </details>
-        </div>
-      </li>
-
-      <li class="step" data-step="6">
-        <div class="step-header">
-          <span class="step-number">6</span>
-          <h2 class="step-title">If they never claimed FBC — refund your FBC</h2>
-        </div>
-        <div class="step-body">
-          <p class="step-hint">
-            Only use this if the counterparty never claimed their FBC and the
-            FBC refund height has passed. Check the FBC tip on
-            <a href="https://explorer.fistbump.org" target="_blank" rel="noreferrer">explorer.fistbump.org</a>.
-          </p>
-          <button id="refund-fbc" class="btn" disabled>Refund my FBC</button>
-          <p class="field-note" id="refund-fbc-countdown"></p>
-          <p class="field-note" id="refund-fbc-status"></p>
-        </div>
-      </li>
-    </ol>
-  </div>
-</section>
-
-<!-- ▬▬ How it works ▬▬ -->
-<section class="how" id="how">
-  <div class="container">
-    <h2 class="section-title">How atomic swaps work</h2>
-    <div class="how-grid">
-      <div class="how-card">
-        <div class="how-step">A</div>
-        <h3>Shared secret</h3>
-        <p>
-          One party generates a 32-byte secret and hashes it. Only the hash is
-          shared. The hash is the puzzle piece; the secret is the key that solves it.
-        </p>
+    <div class="tabpanel hidden" id="panel-liquidity" role="tabpanel" aria-labelledby="tab-liquidity">
+      <div class="panel-actions">
+        <button type="button" class="linkish" id="refresh-quotes">Refresh</button>
       </div>
-      <div class="how-card">
-        <div class="how-step">B</div>
-        <h3>Matching locks</h3>
-        <p>
-          Both chains lock funds into scripts that say: <em>"to spend, either provide
-          the matching secret, or wait until the refund height."</em> Identical logic,
-          two chains.
-        </p>
-      </div>
-      <div class="how-card">
-        <div class="how-step">C</div>
-        <h3>The reveal</h3>
-        <p>
-          Claiming one side requires putting the secret in the transaction witness —
-          which makes the secret public. The other side uses that same secret to claim.
-        </p>
-      </div>
-      <div class="how-card">
-        <div class="how-step">D</div>
-        <h3>Or a refund</h3>
-        <p>
-          If anything goes wrong, the refund paths take over after the <abbr title="Absolute block-height deadlines baked into each HTLC script. Before the deadline, only the recipient-with-preimage can spend; after, only the funder can reclaim.">timelocks</abbr>.
-          No one can be cheated out of their coins — worst case, you wait and get
-          your money back.
-        </p>
+      <div class="quote-list" id="quote-list" role="listbox" aria-label="Market makers">
+        <div class="quote-empty" id="quote-empty">Looking for makers…</div>
       </div>
     </div>
-  </div>
-</section>
 
+    <div class="tabpanel hidden" id="panel-activity" role="tabpanel" aria-labelledby="tab-activity">
+      <div class="sessions-section" id="sessions-section">
+        <div class="sessions-head">
+          <div class="sessions-head-left">
+            <span class="sessions-title">Your swaps</span>
+            <span class="sessions-count" aria-live="polite"></span>
+          </div>
+          <span class="sessions-hint">Saved in this browser</span>
+        </div>
+        <div class="sessions-list" id="sessions-list"></div>
+        <p class="sessions-empty hidden" id="sessions-empty"></p>
+      </div>
+    </div>
+
+    <div class="progress-card hidden" id="progress-card">
+      <div class="progress-header">
+        <h2 class="progress-title" id="progress-title">Preparing…</h2>
+        <button type="button" class="btn ghost" id="reset-btn" title="Back to quotes (swap stays saved)">Close</button>
+      </div>
+      <div class="progress-summary" id="progress-summary"></div>
+      <ol class="progress-steps" id="progress-steps"></ol>
+      <div class="progress-action hidden" id="progress-action">
+        <button type="button" class="btn primary" id="progress-action-btn">Continue</button>
+      </div>
+      <!-- Shown when a signer refuses the spend, or on request. An HTLC input
+           is a custom P2WSH script and most wallets will not sign one, so the
+           unsigned PSBT has to be a first-class output rather than a console
+           log — it is the difference between "sign this elsewhere" and
+           "your coins are stuck". -->
+      <div class="psbt-panel hidden" id="psbt-panel">
+        <div class="psbt-head">
+          <span class="psbt-title" id="psbt-title">Sign this elsewhere</span>
+          <button type="button" class="linkish" id="psbt-copy">Copy</button>
+        </div>
+        <p class="psbt-note" id="psbt-note"></p>
+        <textarea id="psbt-text" class="psbt-text" readonly rows="4" spellcheck="false"></textarea>
+        <details class="psbt-details">
+          <summary>How to sign this</summary>
+          <ol class="psbt-steps">
+            <li><strong>Sparrow:</strong> Tools → Load Transaction → From Text, paste, sign, broadcast.</li>
+            <li><strong>Bitcoin Core:</strong> <code>walletprocesspsbt</code> → <code>finalizepsbt</code> → <code>sendrawtransaction</code>.</li>
+            <li>Do not let the wallet change <code>nLockTime</code> or <code>nSequence</code> — the timelock is enforced against them.</li>
+            <li>Hardware wallets (Ledger, Trezor, Coldcard) cannot sign these scripts. Use a software signer.</li>
+          </ol>
+        </details>
+      </div>
+      <div class="progress-done hidden" id="progress-done">
+        <div class="done-icon" aria-hidden="true">✓</div>
+        <h3 id="progress-done-text">Done</h3>
+        <button type="button" class="btn primary" id="done-reset-btn">New swap</button>
+      </div>
+    </div>
+
+  </div>
 </main>
-
-<footer class="footer">
-  <div class="container footer-inner">
-    <p>
-      Open source · non-custodial · no fees collected. The code this site runs
-      is the code in the repository — audit before trusting it with real funds.
-    </p>
-  </div>
-</footer>
 
 <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
 
-<script type="module" src="./app.js"></script>
-<script>
-  // Mobile nav toggle — matches web/ site pattern
-  (function() {
-    var btn = document.getElementById('menuToggle');
-    var nav = document.getElementById('mobileNav');
-    if (!btn || !nav) return;
-    btn.addEventListener('click', function() {
-      nav.classList.toggle('open');
-      document.body.classList.toggle('nav-open', nav.classList.contains('open'));
-    });
-    nav.addEventListener('click', function(e) {
-      if (e.target.tagName === 'A') {
-        nav.classList.remove('open');
-        document.body.classList.remove('nav-open');
-      }
-    });
-  })();
-</script>
+<script type="module" src="/auto/app.js"></script>
 </body>
 </html>

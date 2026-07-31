@@ -7,3 +7,7 @@ node_modules/
 # web/core/dist is rebuilt by build.sh and copied into web/app/core;
 # only the deploy artifact in web/app/core is tracked.
 web/core/dist/
+
+# secrets / local runtime
+.env
+**/.env

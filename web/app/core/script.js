@@ -79,13 +79,56 @@ function concat(...parts) {
     }
     return out;
 }
-function assertLengths(p) {
+/**
+ * Decode a Bitcoin CScriptNum push into a non-negative integer, or null if the
+ * bytes are anything other than the minimal encoding `encodeScriptNum` emits.
+ *
+ * Two traps live here, both of which turn a permanently unspendable refund
+ * branch into one this library reports as valid and already expired:
+ *
+ *  - `<<` is a 32-bit signed operator and JS reduces the shift count mod 32,
+ *    so `byte << 32` is `byte << 0`: on a 5-byte push the top byte folded back
+ *    into the low byte. `[40 0d 03 00 01]` is 4_295_167_296 — beyond the uint32
+ *    nLockTime field, so nothing can ever spend it — but the old shift loop
+ *    decoded it as 200_001. Hence plain arithmetic, which is exact well past
+ *    the 39-bit ceiling of a 5-byte ScriptNum.
+ *  - Non-minimal encodings are a consensus failure in the script interpreter
+ *    (MINIMALDATA), so accepting them here certifies a branch no node will let
+ *    anyone spend. A trailing 0x00 is legal only when it exists to keep the
+ *    sign bit of the byte below it clear.
+ */
+function decodeScriptNum(bytes) {
+    if (bytes.length < 1 || bytes.length > 5)
+        return null;
+    const top = bytes[bytes.length - 1];
+    // Negative operands are never valid for CLTV.
+    if ((top & 0x80) !== 0)
+        return null;
+    if (top === 0x00 && (bytes.length === 1 || (bytes[bytes.length - 2] & 0x80) === 0)) {
+        return null;
+    }
+    let value = 0;
+    for (let k = 0; k < bytes.length; k++)
+        value += bytes[k] * 2 ** (8 * k);
+    return value;
+}
+function isCompressedPrefix(key) {
+    return key.length === 33 && (key[0] === 0x02 || key[0] === 0x03);
+}
+// Structural checks only — this function's contract is byte-exactness with
+// fbd's `Script.htlc`, and the pinned vectors below it depend on staying a pure
+// encoder. Curve validity is asserted one level up, in `htlcsFromOfferAccept`,
+// which is where every counterparty-supplied key actually enters the protocol
+// (both from `decodeBlob` and, in the Auto UI, from a maker's HTTP response).
+function assertParams(p) {
     if (p.hashlock.length !== 32)
         throw new Error("hashlock must be 32 bytes");
-    if (p.claimPubkey.length !== 33)
-        throw new Error("claimPubkey must be 33 bytes (compressed)");
-    if (p.refundPubkey.length !== 33)
-        throw new Error("refundPubkey must be 33 bytes (compressed)");
+    if (!isCompressedPrefix(p.claimPubkey)) {
+        throw new Error("claimPubkey must be 33 bytes with an 02/03 prefix (compressed)");
+    }
+    if (!isCompressedPrefix(p.refundPubkey)) {
+        throw new Error("refundPubkey must be 33 bytes with an 02/03 prefix (compressed)");
+    }
 }
 /**
  * Build the canonical HTLC witness script from parameters.
@@ -105,7 +148,7 @@ function assertLengths(p) {
  * commitment.
  */
 export function buildHTLCScript(params) {
-    assertLengths(params);
+    assertParams(params);
     const scriptBytes = concat(Uint8Array.of(OP_IF), Uint8Array.of(OP_SHA256), pushBytes(params.hashlock), Uint8Array.of(OP_EQUALVERIFY), pushBytes(params.claimPubkey), Uint8Array.of(OP_CHECKSIG), Uint8Array.of(OP_ELSE), pushBytes(encodeScriptNum(params.locktime)), Uint8Array.of(OP_CLTV), Uint8Array.of(OP_DROP), pushBytes(params.refundPubkey), Uint8Array.of(OP_CHECKSIG), Uint8Array.of(OP_ENDIF));
     return {
         params,
@@ -152,7 +195,7 @@ export function parseHTLCScript(scriptBytes) {
         return null;
     if (!at(OP_ELSE))
         return null;
-    // Locktime push: 1-byte length prefix (2..5 bytes), then N bytes.
+    // Locktime push: a direct-push opcode (0x01..0x05), then that many bytes.
     const ltLen = scriptBytes[i];
     if (ltLen === undefined || ltLen < 1 || ltLen > 5)
         return null;
@@ -174,15 +217,12 @@ export function parseHTLCScript(scriptBytes) {
         return null;
     if (i !== scriptBytes.length)
         return null;
-    // Decode ScriptNum. Negative values would have bit 0x80 set on the last
-    // byte; we reject them to stay in the CLTV-valid range (1..< 5×10^8).
-    if ((ltBytes[ltBytes.length - 1] & 0x80) !== 0)
+    // Pubkeys must at least be structurally compressed — a wrong prefix means
+    // the branch can never produce a valid signature. See `assertParams`.
+    if (!isCompressedPrefix(claimPubkey) || !isCompressedPrefix(refundPubkey))
         return null;
-    let locktime = 0;
-    for (let k = 0; k < ltBytes.length; k++) {
-        locktime |= ltBytes[k] << (8 * k);
-    }
-    if (locktime < 1 || locktime >= 500_000_000)
+    const locktime = decodeScriptNum(ltBytes);
+    if (locktime === null || locktime < 1 || locktime >= 500_000_000)
         return null;
     return { hashlock, claimPubkey, refundPubkey, locktime };
 }

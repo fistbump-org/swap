@@ -1,0 +1,5 @@
+{
+  "protocol": "fistbump-swap-mm/v1",
+  "description": "Public maker directory. Each entry is an independent principal speaking MM_API.md. Empty until someone lists a public maker.",
+  "makers": []
+}

@@ -1,0 +1,11 @@
+# Reverse proxy for the MM bot (auto HTTPS via Let's Encrypt)
+# Usage: caddy run --config Caddyfile
+#
+# Prerequisites:
+#   - DNS: fbc.eskimo.dev → your public IP (done)
+#   - Router: forward TCP 80 and 443 → this Mac
+#   - Bot: npm start (127.0.0.1:8787)
+
+fbc.eskimo.dev {
+	reverse_proxy 127.0.0.1:8787
+}

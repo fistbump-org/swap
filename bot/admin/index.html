@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Maker dashboard</title>
+<style>
+  /* Tokens copied from web/app/fistbump.css rather than linked: this page is
+     served by the bot, on a different host from the web root, and an operator
+     tool that renders unstyled because a stylesheet 404'd is worse than one
+     that carries its own. Keep in step with fistbump.css if that changes. */
+  :root {
+    --fb-bg: #09090b; --fb-bg-raised: #111113; --fb-bg-card: #18181b;
+    --fb-bg-input: #1e1e22; --fb-bg-hover: #27272a;
+    --fb-border: #27272a; --fb-border-light: #3f3f46;
+    --fb-text: #fafafa; --fb-text-muted: #a1a1aa; --fb-text-dim: #71717a;
+    --fb-accent: #57c7ed; --fb-accent-bg: rgba(87, 199, 237, 0.08);
+    --fb-yellow: #fbbf24; --fb-yellow-bg: rgba(251, 191, 36, 0.12);
+    --fb-red: #f87171; --fb-red-bg: rgba(248, 113, 113, 0.12);
+    --fb-green: #4ade80; --fb-green-bg: rgba(74, 222, 128, 0.12);
+    --fb-font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Helvetica, Arial, sans-serif;
+    --fb-font-mono: "IBM Plex Mono", "SF Mono", "Cascadia Code", Menlo, monospace;
+    --r: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 20px 72px;
+    background: var(--fb-bg); color: var(--fb-text);
+    font: 14px/1.5 var(--fb-font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; font-weight: 600; }
+  .sub { color: var(--fb-text-dim); font-size: 12px; margin: 2px 0 0; }
+  .sub .net { font-family: var(--fb-font-mono); }
+
+  .card {
+    background: var(--fb-bg-card); border: 1px solid var(--fb-border);
+    border-radius: var(--r); padding: 16px 18px;
+  }
+  .card h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fb-text-dim); margin: 0 0 14px; font-weight: 600;
+  }
+
+  .wallets { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .bal {
+    font-family: var(--fb-font-mono); font-size: 26px; font-weight: 500;
+    letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+    display: flex; align-items: baseline; gap: 7px;
+  }
+  .bal .unit { font-size: 13px; color: var(--fb-text-muted); font-weight: 400; }
+  /* An unreachable node and an empty wallet are different facts and must not
+     look alike — the whole reason bitcoindSpendableSats throws rather than
+     returning zero. */
+  .bal.unknown { color: var(--fb-yellow); font-size: 15px; }
+  .bal-sub { color: var(--fb-text-dim); font-size: 12px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+
+  .addr { margin-top: 14px; }
+  .addr-label { font-size: 11px; color: var(--fb-text-dim); margin-bottom: 5px; }
+  .addr-row { display: flex; gap: 8px; align-items: stretch; }
+  .addr-val {
+    flex: 1; min-width: 0; font-family: var(--fb-font-mono); font-size: 11.5px;
+    background: var(--fb-bg-input); border: 1px solid var(--fb-border);
+    border-radius: 7px; padding: 8px 10px; overflow-wrap: anywhere; color: var(--fb-text-muted);
+  }
+
+  button {
+    font: 500 13px var(--fb-font-sans); border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--fb-border-light); background: var(--fb-bg-hover);
+    color: var(--fb-text); padding: 8px 13px; white-space: nowrap;
+  }
+  button:hover { border-color: var(--fb-text-dim); }
+  button:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: 2px; }
+  button.primary { background: var(--fb-accent); border-color: var(--fb-accent); color: #06222d; font-weight: 600; }
+  button.danger { border-color: rgba(248,113,113,0.45); color: var(--fb-red); background: var(--fb-red-bg); }
+  button:disabled { opacity: 0.45; cursor: default; }
+
+  input[type=text], input[type=password] {
+    font-family: var(--fb-font-mono); font-size: 14px;
+    background: var(--fb-bg-input); border: 1px solid var(--fb-border);
+    border-radius: 7px; padding: 9px 11px; color: var(--fb-text); width: 100%;
+  }
+  input:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: -1px; border-color: transparent; }
+
+  .price-now {
+    font-family: var(--fb-font-mono); font-size: 30px; font-weight: 500;
+    letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  }
+  .price-meta { color: var(--fb-text-dim); font-size: 12px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .price-edit { display: flex; gap: 8px; margin-top: 15px; align-items: center; flex-wrap: wrap; }
+  .price-edit .field { position: relative; flex: 0 1 190px; }
+  .price-edit .field::before {
+    content: "$"; position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+    color: var(--fb-text-dim); font-family: var(--fb-font-mono); pointer-events: none;
+  }
+  .price-edit input { padding-left: 23px; }
+
+  .tag {
+    display: inline-block; font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.06em; padding: 2px 7px; border-radius: 5px; font-weight: 600;
+    vertical-align: middle; margin-left: 8px;
+  }
+  .tag.set { background: var(--fb-accent-bg); color: var(--fb-accent); }
+  .tag.env { background: var(--fb-bg-hover); color: var(--fb-text-dim); }
+
+  .limits { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .limit label { display: block; font-size: 12px; color: var(--fb-text-muted); margin-bottom: 6px; }
+  .limit-row { display: flex; gap: 7px; }
+  .limit-row input { flex: 1 1 auto; min-width: 0; }
+  .limit-note { font-size: 11.5px; color: var(--fb-text-dim); margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 14px; }
+  .stat-v { font-family: var(--fb-font-mono); font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stat-k { font-size: 11px; color: var(--fb-text-dim); margin-top: 2px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--fb-text-dim); padding: 0 10px 8px 0;
+    border-bottom: 1px solid var(--fb-border);
+  }
+  td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--fb-border); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--fb-font-mono); text-align: right; padding-right: 0; }
+  th.num { text-align: right; padding-right: 0; }
+  .settling { color: var(--fb-text-dim); font-style: italic; }
+  .scroll { overflow-x: auto; }
+
+  .msg { padding: 11px 13px; border-radius: 8px; font-size: 13px; border: 1px solid var(--fb-border); }
+  .msg.ok { border-color: rgba(74,222,128,0.4); background: var(--fb-green-bg); color: var(--fb-green); }
+  .msg.bad { border-color: rgba(248,113,113,0.4); background: var(--fb-red-bg); color: var(--fb-red); }
+  .msg.warn { border-color: rgba(251,191,36,0.4); background: var(--fb-yellow-bg); color: var(--fb-yellow); }
+  .hidden { display: none !important; }
+  .empty { color: var(--fb-text-dim); font-size: 13px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.up { background: var(--fb-green); } .dot.down { background: var(--fb-red); }
+</style>
+</head>
+<body>
+
+<main>
+  <!-- Gate. The page ships with no data in it; everything below arrives from
+       authenticated fetches once a token is supplied. -->
+  <section id="gate" class="card">
+    <h2>Maker dashboard</h2>
+    <p class="sub" style="margin-bottom:14px">
+      Enter the admin token (<code>MM_ADMIN_TOKEN</code>). It is kept for this
+      tab only and is not written to disk.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input type="password" id="token" placeholder="admin token" autocomplete="current-password" spellcheck="false" style="flex:1 1 240px">
+      <button class="primary" id="unlock">Unlock</button>
+    </div>
+    <div id="gate-msg" class="msg bad hidden" style="margin-top:12px"></div>
+  </section>
+
+  <div id="app" class="hidden" style="display:flex;flex-direction:column;gap:20px">
+
+    <header>
+      <div>
+        <h1>Maker dashboard</h1>
+        <p class="sub"><span id="conn"></span> · <span class="net" id="networks"></span></p>
+      </div>
+      <button id="refresh">Refresh</button>
+    </header>
+
+    <div id="banner" class="msg warn hidden"></div>
+
+    <section class="wallets">
+      <div class="card">
+        <h2>Bitcoin</h2>
+        <div class="bal" id="btc-bal">—</div>
+        <div class="bal-sub" id="btc-sub"></div>
+        <div class="addr">
+          <div class="addr-label">Deposit address — send BTC here to cover claim fees</div>
+          <div class="addr-row">
+            <div class="addr-val" id="btc-addr">—</div>
+            <button data-copy="btc-addr">Copy</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Fistbump</h2>
+        <div class="bal" id="fbc-bal">—</div>
+        <div class="bal-sub" id="fbc-sub"></div>
+        <div class="addr">
+          <div class="addr-label">Deposit address — send FBC here to add sellable inventory</div>
+          <div class="addr-row">
+            <div class="addr-val" id="fbc-addr">—</div>
+            <button data-copy="fbc-addr">Copy</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Sell price</h2>
+      <div class="price-now"><span id="price-val">—</span> <span class="unit" style="font-size:13px;color:var(--fb-text-muted)">per FBC</span><span id="price-tag"></span></div>
+      <div class="price-meta" id="price-meta"></div>
+      <div class="price-edit">
+        <div class="field"><input type="text" id="price-input" inputmode="decimal" spellcheck="false" placeholder="0.01"></div>
+        <button class="primary" id="price-save">Set price</button>
+        <button id="price-reset" class="hidden">Use env default</button>
+      </div>
+      <div id="price-msg" class="msg hidden" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Inventory</h2>
+      <div class="stats">
+        <div><div class="stat-v" id="inv-avail">—</div><div class="stat-k">FBC sellable now</div></div>
+        <div><div class="stat-v" id="inv-active">—</div><div class="stat-k">Swaps in flight</div></div>
+        <div><div class="stat-v" id="inv-waiting">—</div><div class="stat-k">Quotes unfunded</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Swap limits</h2>
+      <div class="limits">
+        <div class="limit">
+          <label for="set-max_fbc">Max FBC per swap</label>
+          <div class="limit-row">
+            <input type="text" id="set-max_fbc" inputmode="numeric" spellcheck="false">
+            <button data-set="max_fbc">Save</button>
+            <button data-clear="max_fbc" class="hidden">Env</button>
+          </div>
+          <div class="limit-note" id="note-max_fbc"></div>
+        </div>
+        <div class="limit">
+          <label for="set-min_btc_sat">Minimum swap (sat)</label>
+          <div class="limit-row">
+            <input type="text" id="set-min_btc_sat" inputmode="numeric" spellcheck="false">
+            <button data-set="min_btc_sat">Save</button>
+            <button data-clear="min_btc_sat" class="hidden">Env</button>
+          </div>
+          <div class="limit-note" id="note-min_btc_sat"></div>
+        </div>
+      </div>
+      <div id="limits-msg" class="msg hidden" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Withdraw</h2>
+      <p class="sub" style="margin:-6px 0 14px">
+        Sends from the maker wallets. FBC promised to live swaps and a BTC
+        claim-fee reserve are held back and cannot be sent.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="wd-chain" style="font:14px var(--fb-font-sans);background:var(--fb-bg-input);color:var(--fb-text);border:1px solid var(--fb-border);border-radius:7px;padding:9px 11px">
+          <option value="btc">BTC</option>
+          <option value="fbc">FBC</option>
+        </select>
+        <input type="text" id="wd-addr" placeholder="destination address" spellcheck="false" style="flex:1 1 260px">
+        <input type="text" id="wd-amt" inputmode="decimal" placeholder="amount" spellcheck="false" style="flex:0 1 150px">
+        <button id="wd-max">Max</button>
+        <button class="danger" id="wd-send">Send…</button>
+      </div>
+      <div class="price-meta" id="wd-avail"></div>
+      <div id="wd-msg" class="msg hidden" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Swaps</h2>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>When</th><th>You</th>
+              <th class="num">BTC</th><th class="num">FBC</th><th class="num">FBC / BTC</th>
+            </tr>
+          </thead>
+          <tbody id="swaps"></tbody>
+        </table>
+      </div>
+      <p class="empty hidden" id="swaps-empty">No swaps yet.</p>
+    </section>
+
+  </div>
+</main>
+
+<script>
+// Session-scoped on purpose: the token unlocks wallet balances and the sell
+// price, so it dies with the tab rather than persisting on the operator's disk.
+let TOKEN = sessionStorage.getItem("mm_admin_token") || "";
+let timer = null;
+
+const $ = (id) => document.getElementById(id);
+const show = (el, on) => el.classList.toggle("hidden", !on);
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { ...(options.headers || {}), Authorization: "Bearer " + TOKEN },
+  });
+  if (res.status === 401) throw Object.assign(new Error("unauthorized"), { unauthorized: true });
+  return res;
+}
+
+function fmt(n, dp = 0) {
+  return typeof n === "number" && isFinite(n)
+    ? n.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
+    : "—";
+}
+
+function setBalance(elId, subId, value, unit, sub) {
+  const el = $(elId);
+  if (value === null || value === undefined) {
+    // Not zero. The node did not answer, and showing "0" would tell the
+    // operator they are broke when they may not be.
+    el.className = "bal unknown";
+    el.textContent = "node unreachable";
+    $(subId).textContent = "balance unknown — check the daemon";
+    return;
+  }
+  el.className = "bal";
+  el.innerHTML = "";
+  el.append(document.createTextNode(value));
+  const u = document.createElement("span");
+  u.className = "unit";
+  u.textContent = unit;
+  el.append(u);
+  $(subId).textContent = sub;
+}
+
+function renderState(s) {
+  $("networks").textContent = `btc:${s.networks.btc} fbc:${s.networks.fbc}`;
+
+  const btc = s.wallets.btc;
+  setBalance(
+    "btc-bal", "btc-sub",
+    btc.spendable_sat === null ? null : (btc.spendable_sat / 1e8).toFixed(8),
+    "BTC",
+    btc.spendable_sat === null ? "" : `${fmt(btc.spendable_sat)} sat · wallet ${btc.wallet || "default"}`,
+  );
+  $("btc-addr").textContent = btc.deposit_address || "—";
+
+  const fbc = s.wallets.fbc;
+  setBalance(
+    "fbc-bal", "fbc-sub",
+    fbc.balance_fbc === null ? null : fmt(fbc.balance_fbc, 6),
+    "FBC",
+    fbc.balance_fbc === null ? "" : `wallet ${fbc.wallet || "default"}`,
+  );
+  $("fbc-addr").textContent = fbc.deposit_address || "—";
+
+  const p = s.price;
+  $("price-val").textContent = "$" + p.fbc_usd;
+  $("price-tag").innerHTML = p.overridden
+    ? '<span class="tag set">set here</span>'
+    : '<span class="tag env">from env</span>';
+  const bits = [];
+  if (p.mid_fbc_per_btc) bits.push(`${fmt(p.mid_fbc_per_btc)} FBC per BTC`);
+  if (p.btc_usd) bits.push(`BTC $${fmt(p.btc_usd)}`);
+  if (p.spread_bps) bits.push(`spread ${p.spread_bps} bps`);
+  if (p.overridden && p.updated_at) bits.push(`set ${new Date(p.updated_at).toLocaleString()}`);
+  else if (!p.overridden) bits.push(`env default $${p.env_default}`);
+  $("price-meta").textContent = bits.join(" · ");
+  show($("price-reset"), p.overridden);
+  if (document.activeElement !== $("price-input")) $("price-input").value = String(p.fbc_usd);
+
+  const inv = s.inventory;
+  $("inv-avail").textContent = inv.available_fbc === null ? "—" : fmt(inv.available_fbc, 2);
+  paintLimits(s, inv);
+  // Deliberately two numbers. "In flight" is money committed on a chain and is
+  // the one worth reacting to; an accepted quote nobody funded reserves nothing
+  // and expires by itself. Adding those together made an abandoned offer from
+  // last night look like a live swap.
+  //
+  // in_flight ALONE, not in_flight + settling. A settling swap is an active
+  // swap with both legs funded, so it is already inside in_flight — adding
+  // them counted every settling swap twice. Introduced, embarrassingly, by the
+  // change that fixed a different miscount on this same widget.
+  $("inv-active").textContent = fmt(s.swaps.in_flight);
+  $("inv-waiting").textContent = fmt(s.swaps.awaiting_funding);
+
+  // A wallet the bot cannot read is the thing an operator most needs told,
+  // because every quote is refused while it lasts.
+  const down = [];
+  if (btc.spendable_sat === null) down.push("bitcoind");
+  if (fbc.balance_fbc === null) down.push("fbd");
+  const banner = $("banner");
+  if (down.length) {
+    banner.textContent =
+      `Cannot read ${down.join(" or ")}. Quotes are refused while a balance is unknown — ` +
+      `the bot will not promise inventory it cannot see.`;
+    show(banner, true);
+  } else {
+    show(banner, false);
+  }
+
+  lastState = s;
+  paintWithdrawAvailable();
+
+  $("conn").innerHTML = down.length
+    ? '<span class="dot down"></span>degraded'
+    : '<span class="dot up"></span>running';
+}
+
+function renderSwaps(d) {
+  const rows = [];
+  // `maker_action` not `side`: Side is taker-relative by definition, so a row
+  // for a swap where this maker sold FBC was labelled "buy_fbc" — the
+  // counterparty's action, on the operator's own dashboard. The server sends
+  // the wording so this page never has to know the convention.
+  for (const t of d.settling || []) {
+    rows.push({
+      when: t.settling_since, action: t.maker_action, sat: t.amount_btc_sat,
+      fbc: t.amount_fbc_bumps / 1e6, settling: true,
+    });
+  }
+  for (const t of d.settled || []) {
+    rows.push({
+      when: t.settled_at, action: t.maker_action, sat: t.amount_btc_sat,
+      fbc: t.amount_fbc_bumps / 1e6, settling: false,
+    });
+  }
+  const body = $("swaps");
+  body.innerHTML = "";
+  show($("swaps-empty"), rows.length === 0);
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    const rate = r.sat > 0 ? (r.fbc / (r.sat / 1e8)) : null;
+    const cells = [
+      new Date(r.when).toLocaleString(),
+      r.action || "—",
+      fmt(r.sat),
+      fmt(r.fbc, 6),
+      r.settling ? "settling" : fmt(rate),
+    ];
+    cells.forEach((v, i) => {
+      const td = document.createElement("td");
+      if (i >= 2) td.className = "num";
+      if (i === 4 && r.settling) td.className = "num settling";
+      td.textContent = v;
+      tr.append(td);
+    });
+    if (r.settling) tr.style.opacity = "0.65";
+    body.append(tr);
+  }
+}
+
+async function load() {
+  const [stateRes, swapsRes] = await Promise.all([api("/api/state"), api("/api/swaps")]);
+  if (stateRes.ok) renderState(await stateRes.json());
+  if (swapsRes.ok) renderSwaps(await swapsRes.json());
+}
+
+function fail(el, text, kind = "bad") {
+  el.className = "msg " + kind;
+  el.textContent = text;
+  show(el, true);
+}
+
+async function unlock() {
+  TOKEN = $("token").value.trim();
+  if (!TOKEN) return;
+  try {
+    const res = await api("/api/state");
+    if (!res.ok) throw new Error("rejected");
+    sessionStorage.setItem("mm_admin_token", TOKEN);
+    show($("gate"), false);
+    show($("app"), true);
+    $("token").value = "";
+    await load();
+    // Balances and swap state move on their own; a dashboard that needs
+    // reloading to be true is a dashboard nobody trusts.
+    timer = setInterval(() => load().catch(lock), 15000);
+  } catch (e) {
+    fail($("gate-msg"), e.unauthorized ? "That token was not accepted." : "Could not reach the bot.");
+  }
+}
+
+function lock(e) {
+  if (!e || !e.unauthorized) return;
+  clearInterval(timer);
+  TOKEN = "";
+  sessionStorage.removeItem("mm_admin_token");
+  show($("app"), false);
+  show($("gate"), true);
+  fail($("gate-msg"), "Session ended — enter the token again.");
+}
+
+async function savePrice(confirmed) {
+  const msg = $("price-msg");
+  const value = Number($("price-input").value.trim());
+  if (!isFinite(value) || value <= 0) {
+    fail(msg, "Enter a price greater than zero.");
+    return;
+  }
+  const res = await api("/api/price", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fbc_usd: value, confirm: confirmed === true }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 409) {
+    // The server refused a big jump. Repeat its own wording rather than
+    // paraphrasing — it names both prices, which is the point.
+    fail(msg, body.detail || "Confirm this change.", "warn");
+    const btn = document.createElement("button");
+    btn.className = "danger";
+    btn.style.marginTop = "10px";
+    btn.textContent = `Yes, sell at $${value} per FBC`;
+    btn.onclick = () => savePrice(true);
+    msg.append(document.createElement("br"), btn);
+    return;
+  }
+  if (!res.ok) {
+    fail(msg, body.error || "Could not set the price.");
+    return;
+  }
+  fail(msg, `Now selling at $${body.fbc_usd} per FBC.`, "ok");
+  await load();
+}
+
+$("unlock").onclick = () => unlock();
+$("token").onkeydown = (e) => { if (e.key === "Enter") unlock(); };
+$("refresh").onclick = () => load().catch(lock);
+$("price-save").onclick = () => savePrice(false).catch(lock);
+$("price-input").onkeydown = (e) => { if (e.key === "Enter") savePrice(false).catch(lock); };
+$("price-reset").onclick = async () => {
+  const res = await api("/api/price", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clear: true }),
+  });
+  if (res.ok) {
+    fail($("price-msg"), "Price handed back to the environment.", "ok");
+    await load();
+  }
+};
+// ── Swap limits ─────────────────────────────────────────────────────────
+//
+// Rendered from whatever the server lists under `settings`, so a value added
+// to SPEC later shows up here without this file changing. The only per-field
+// knowledge kept below is the note under each input, which is genuinely
+// specific — the minimum's note has to explain that it is a floor the fee
+// market can raise, and a generic renderer cannot know that.
+
+const LIMIT_KEYS = ["max_fbc", "min_btc_sat"];
+
+function paintLimits(s, inv) {
+  const all = s.settings || {};
+  for (const key of LIMIT_KEYS) {
+    const meta = all[key];
+    const input = document.getElementById("set-" + key);
+    const note = document.getElementById("note-" + key);
+    const clearBtn = document.querySelector(`[data-clear="${key}"]`);
+    if (!meta || !input) continue;
+    // Never clobber a value being typed. The 15s refresh would otherwise undo
+    // an edit mid-keystroke.
+    if (document.activeElement !== input) input.value = String(meta.value);
+    show(clearBtn, meta.overridden);
+    const bits = [meta.overridden ? "set here" : `from env (${meta.env_default})`];
+    bits.push(`allowed ${fmt(meta.min)}–${fmt(meta.max)}`);
+    if (key === "min_btc_sat") {
+      // The distinction that matters: this is a floor, and the number actually
+      // enforced right now may be higher. Silently ignoring a low setting
+      // without saying so is how an operator concludes the field is broken.
+      const live = inv.min_btc_sat;
+      if (live != null && live > meta.value) {
+        bits.push(`fees currently raise it to ${fmt(live)}`);
+      }
+    }
+    note.textContent = bits.join(" · ");
+  }
+}
+
+async function saveLimit(key) {
+  const msg = $("limits-msg");
+  const value = Number(document.getElementById("set-" + key).value.trim());
+  if (!isFinite(value)) { fail(msg, "Enter a number."); return; }
+  const res = await api("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value }),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) { fail(msg, out.error || "Could not save."); return; }
+  fail(msg, `${key.replace(/_/g, " ")} is now ${fmt(out.value)}.`, "ok");
+  await load();
+}
+
+async function clearLimit(key) {
+  const res = await api("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, clear: true }),
+  });
+  if (res.ok) {
+    fail($("limits-msg"), `${key.replace(/_/g, " ")} handed back to the environment.`, "ok");
+    await load();
+  }
+}
+
+for (const b of document.querySelectorAll("[data-set]")) {
+  b.onclick = () => saveLimit(b.dataset.set).catch(lock);
+}
+for (const b of document.querySelectorAll("[data-clear]")) {
+  b.onclick = () => clearLimit(b.dataset.clear).catch(lock);
+}
+for (const key of LIMIT_KEYS) {
+  document.getElementById("set-" + key).onkeydown = (e) => {
+    if (e.key === "Enter") saveLimit(key).catch(lock);
+  };
+}
+
+// ── Withdraw ────────────────────────────────────────────────────────────
+//
+// Two steps, always. The first click only tells you what is about to happen;
+// nothing is sent until you confirm a second time. Nothing on this page can
+// tell whether a destination address is yours, so the one defence is making
+// you read it back before it moves.
+
+let lastState = null;
+
+function withdrawUnits() {
+  return $("wd-chain").value === "btc"
+    ? { name: "BTC", per: 1e8, dp: 8 }
+    : { name: "FBC", per: 1e6, dp: 6 };
+}
+
+function paintWithdrawAvailable() {
+  if (!lastState) return;
+  const chain = $("wd-chain").value;
+  const el = $("wd-avail");
+  if (chain === "btc") {
+    const bal = lastState.wallets.btc.spendable_sat;
+    const reserve = lastState.limits?.btc_fee_reserve_sat ?? 0;
+    if (bal === null) { el.textContent = "bitcoind unreachable — cannot withdraw"; return; }
+    const free = Math.max(0, bal - reserve);
+    el.textContent =
+      `${(free / 1e8).toFixed(8)} BTC available · ${fmt(reserve)} sat held back for claim fees`;
+  } else {
+    const avail = lastState.inventory.available_fbc;
+    const bal = lastState.wallets.fbc.balance_fbc;
+    if (avail === null || bal === null) { el.textContent = "fbd unreachable — cannot withdraw"; return; }
+    const held = Math.max(0, bal - avail);
+    el.textContent = held > 0
+      ? `${fmt(avail, 6)} FBC available · ${fmt(held, 6)} promised to swaps in flight`
+      : `${fmt(avail, 6)} FBC available`;
+  }
+}
+
+async function withdraw(confirmed) {
+  const msg = $("wd-msg");
+  const chain = $("wd-chain").value;
+  const u = withdrawUnits();
+  const address = $("wd-addr").value.trim();
+  const raw = $("wd-amt").value.trim();
+  const isMax = raw.toLowerCase() === "max";
+  if (!address) { fail(msg, "Enter a destination address."); return; }
+  const whole = isMax ? null : Number(raw);
+  if (!isMax && (!isFinite(whole) || whole <= 0)) {
+    fail(msg, `Enter an amount in ${u.name}, or "max".`);
+    return;
+  }
+
+  if (!confirmed) {
+    // Show, do not send. The address is repeated in full — a truncated one is
+    // exactly what an address-swapping clipboard attack survives.
+    msg.className = "msg warn";
+    msg.textContent = `Send ${isMax ? "everything available" : raw + " " + u.name} to:`;
+    const addr = document.createElement("div");
+    addr.style.cssText =
+      "font-family:var(--fb-font-mono);font-size:12px;margin:8px 0;overflow-wrap:anywhere;color:var(--fb-text)";
+    addr.textContent = address;
+    const warn = document.createElement("div");
+    warn.textContent =
+      "Check every character. This cannot be reversed and nothing here can tell whether the address is yours.";
+    const go = document.createElement("button");
+    go.className = "danger";
+    go.style.marginTop = "10px";
+    go.textContent = `Yes, send it`;
+    go.onclick = () => withdraw(true);
+    msg.append(addr, warn, go);
+    show(msg, true);
+    return;
+  }
+
+  const body = isMax
+    ? { chain, address, max: true, confirm: true }
+    : { chain, address, amount: Math.round(whole * u.per), confirm: true };
+  const res = await api("/api/withdraw", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) { fail(msg, out.error || "Withdrawal failed."); return; }
+  fail(msg, `Sent ${(out.amount / u.per).toFixed(u.dp)} ${u.name} — ${out.txid}`, "ok");
+  $("wd-amt").value = "";
+  $("wd-addr").value = "";
+  await load();
+}
+
+$("wd-chain").onchange = paintWithdrawAvailable;
+$("wd-max").onclick = () => { $("wd-amt").value = "max"; };
+$("wd-send").onclick = () => withdraw(false).catch(lock);
+
+for (const b of document.querySelectorAll("[data-copy]")) {
+  b.onclick = async () => {
+    const text = $(b.dataset.copy).textContent;
+    if (!text || text === "—") return;
+    try {
+      await navigator.clipboard.writeText(text);
+      const was = b.textContent;
+      b.textContent = "Copied";
+      setTimeout(() => { b.textContent = was; }, 1200);
+    } catch { /* clipboard blocked — the address is on screen to select */ }
+  };
+}
+
+if (TOKEN) {
+  $("token").value = TOKEN;
+  unlock();
+}
+</script>
+</body>
+</html>

@@ -82,6 +82,12 @@ export interface FundedFbcBlob {
   funding_vout: number;
   funding_amount: number;
   witness_script_hex: string;
+  /**
+   * Optional convenience field (see MM_API.md). When present it MUST equal the
+   * address the witness script commits to — `verifyFundedFbc` checks this, so
+   * a counterparty cannot pair a valid script with an unrelated outpoint.
+   */
+  htlc_address?: string;
 }
 
 export type SwapBlob = OfferBlob | AcceptBlob | FundedBtcBlob | FundedFbcBlob;

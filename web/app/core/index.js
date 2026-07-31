@@ -14,7 +14,8 @@
 export { buildHTLCScript, parseHTLCScript } from "./script.js";
 export { btcHTLCAddress, fbcHTLCAddress } from "./address.js";
 export { generatePreimage, hashlockOf } from "./preimage.js";
-export { encodeBlob, decodeBlob, htlcsFromOfferAccept, verifyFundedBtc, verifyFundedFbc, generateOfferId, } from "./offer.js";
+export { isCompressedPubkey } from "./pubkey.js";
+export { encodeBlob, decodeBlob, htlcsFromOfferAccept, htlcParamsForRecovery, checkTimelocks, verifyFundedBtc, verifyFundedFbc, generateOfferId, fbcClaimDeadline, MIN_DELTA_SECONDS, CLAIM_SAFETY_BLOCKS_FBC, } from "./offer.js";
 export { toHex, fromHex } from "./hex.js";
 export { buildHTLCSpendPsbt, finalizeHTLCSpend, signAndFinalizeWithWIF } from "./btc.js";
 export { blobQrDataUrl } from "./qr.js";

@@ -2,7 +2,8 @@
 //
 // Delegates all signing to the user's wallets:
 //   - FBC side: window.fistbump (Fistbump browser extension)
-//   - BTC side: window.unisat (Unisat / compatible BIP-174 wallet)
+//   - BTC side: Unisat, OKX or Xverse via ./btc-wallet.js. None is
+//     guaranteed to sign an HTLC spend, so every spend also offers a PSBT.
 //
 // This file exists to:
 //   1. Walk the user through the protocol step-by-step.
@@ -23,6 +24,8 @@ import {
   encodeBlob,
   decodeBlob,
   htlcsFromOfferAccept,
+  htlcParamsForRecovery,
+  checkTimelocks,
   verifyFundedBtc,
   verifyFundedFbc,
   toHex,
@@ -33,6 +36,8 @@ import {
   blobQrDataUrl,
 } from "./core/bundle.js";
 
+import { selectBtcWallet } from "./btc-wallet.js";
+import { btcFetch } from "./btc-api.js";
 import { loadState, patchState, clearState, hasState } from "./state.js";
 import {
   pollBtcConfirmations,
@@ -41,6 +46,8 @@ import {
   pollFbcTip,
   pollFbcPreimageReveal,
   estimateWallClock,
+  fetchBtcOutput,
+  fetchBtcFeeRate,
 } from "./chain.js";
 
 const params = new URLSearchParams(location.search);
@@ -167,7 +174,6 @@ function confirmModal({ title, body, confirmLabel, cancelLabel, danger }) {
 }
 
 // Blockstream Esplora for BTC data + broadcast. 3xpl for explorer links.
-const BTC_API = "https://blockstream.info/api";
 const BTC_EXPLORER = "https://3xpl.com/bitcoin/transaction";
 const FBC_EXPLORER = "https://explorer.fistbump.org";
 const FBC_API = "https://explorer.fistbump.org/api";
@@ -181,13 +187,10 @@ const FBC_BLOCK_SECONDS = 120;
 const MIN_AMOUNT_BTC_SAT = 10_000;
 const MIN_AMOUNT_FBC_DOLLARYDOOS = 1_000_000;
 
-// Reference-height staleness guard from SPEC.md §4.3. If the offer says
-// btc/fbc tip was N blocks behind the accepter's observed tip, reject —
-// the parties are out of sync and T1/T2 estimates can't be compared safely.
-const MAX_REF_HEIGHT_STALENESS_BTC = 10;
-const MAX_REF_HEIGHT_STALENESS_FBC = 20;
-
-// Wall-clock buffer floor from SPEC.md §4.2: T2 − T1 ≥ 12 hours.
+// Wall-clock buffer floor from SPEC.md §4.2: T1 − T2 ≥ 12 hours. Alice funds
+// first and holds the preimage, so her BTC refund must open LAST. Used here
+// only for the offer-builder UI; the authoritative check (including
+// reference-height staleness, §4.3) is `checkTimelocks` in the core library.
 const MIN_DELTA_HOURS = 12;
 
 /**
@@ -219,38 +222,17 @@ function validateOffer(offer, observed) {
       reason: `amount_fbc must be ≥ ${MIN_AMOUNT_FBC_DOLLARYDOOS.toLocaleString()} dollarydoos (1 FBC)`,
     };
   }
-  // Safety buffer (SPEC §4.2): T2 - T1 in wall-clock seconds, computed from
-  // each chain's own reference tip. Raw-height comparison would be meaningless
-  // since BTC and FBC heights advance on independent chains.
-  const btcSecondsToT1 = (offer.btc_refund_height - offer.btc_reference_height) * BTC_BLOCK_SECONDS;
-  const fbcSecondsToT2 = (offer.fbc_refund_height - offer.fbc_reference_height) * FBC_BLOCK_SECONDS;
-  const deltaHours = (fbcSecondsToT2 - btcSecondsToT1) / 3600;
-  if (deltaHours < MIN_DELTA_HOURS) {
-    return {
-      ok: false,
-      reason: `Δ = ${deltaHours.toFixed(1)}h, must be ≥ ${MIN_DELTA_HOURS}h (SPEC §4.2)`,
-    };
-  }
+  // Timelock safety (SPEC §4.2/§4.3) lives in the core library so the P2P
+  // flow, the Auto flow and the reference maker cannot drift apart. It covers
+  // the wall-clock Δ (T1 must fall at least 12h AFTER T2), reference-height
+  // staleness against observed tips, and absolute bounds on both refunds.
+  const timelocks = checkTimelocks(offer, observed || undefined);
+  if (!timelocks.ok) return timelocks;
+
   if (offer.expires_at) {
     const expiry = Date.parse(offer.expires_at);
     if (!Number.isNaN(expiry) && expiry < Date.now()) {
       return { ok: false, reason: `offer expired at ${offer.expires_at}` };
-    }
-  }
-  if (observed) {
-    if (Number.isInteger(observed.btcTip) &&
-        offer.btc_reference_height < observed.btcTip - MAX_REF_HEIGHT_STALENESS_BTC) {
-      return {
-        ok: false,
-        reason: `BTC reference height ${offer.btc_reference_height} is > ${MAX_REF_HEIGHT_STALENESS_BTC} blocks behind current tip ${observed.btcTip}`,
-      };
-    }
-    if (Number.isInteger(observed.fbcTip) &&
-        offer.fbc_reference_height < observed.fbcTip - MAX_REF_HEIGHT_STALENESS_FBC) {
-      return {
-        ok: false,
-        reason: `FBC reference height ${offer.fbc_reference_height} is > ${MAX_REF_HEIGHT_STALENESS_FBC} blocks behind current tip ${observed.fbcTip}`,
-      };
     }
   }
   return { ok: true };
@@ -322,16 +304,25 @@ async function connectFistbump() {
   return { address: conn.address, pubkey };
 }
 
-async function connectUnisat() {
-  if (!window.unisat) {
+let btcWallet = null;
+
+/**
+ * Connect whichever BTC provider is present.
+ *
+ * Unisat, OKX and Xverse are all accepted. None of them is guaranteed to sign
+ * an HTLC spend — that is a custom P2WSH input and wallets routinely refuse
+ * one — so every spend step also offers the unsigned PSBT.
+ */
+async function connectBtcWallet() {
+  btcWallet = selectBtcWallet(localStorage.getItem("btc_wallet") || undefined);
+  if (!btcWallet) {
     throw new Error(
-      "Unisat wallet not found. Install Unisat, Xverse, or another BIP-174 wallet.",
+      "No BTC wallet detected. Install Unisat, OKX or Xverse, or use the " +
+        "Export PSBT path to sign elsewhere.",
     );
   }
-  const accounts = await window.unisat.requestAccounts();
-  if (!accounts || !accounts[0]) throw new Error("No Bitcoin account available");
-  const pubkey = await window.unisat.getPublicKey();
-  return { address: accounts[0], pubkey };
+  localStorage.setItem("btc_wallet", btcWallet.id);
+  return btcWallet.connect();
 }
 
 // ---- Alice: wallet connect ----
@@ -340,7 +331,7 @@ document.getElementById("btc-connect").addEventListener("click", async () => {
   const statusEl = document.getElementById("btc-status");
   try {
     setStatus(statusEl, "connecting…", null);
-    alice.btc = await connectUnisat();
+    alice.btc = await connectBtcWallet();
     setStatus(statusEl, alice.btc.address, "connected");
     updateAliceBuildOfferEnabled();
   } catch (err) {
@@ -372,13 +363,15 @@ const buildOfferBtn = document.getElementById("build-offer");
 function updateTimelockNote() {
   const btcH = Number(btcHoursInput.value);
   const fbcH = Number(fbcHoursInput.value);
-  if (fbcH - btcH < MIN_DELTA_HOURS) {
+  // SPEC §4.2: your BTC refund must open at least Δ AFTER their FBC refund.
+  // You hold the preimage, so you must be the last one able to walk away.
+  if (btcH - fbcH < MIN_DELTA_HOURS) {
     timelockNote.textContent =
-      `FBC window must exceed BTC window by at least ${MIN_DELTA_HOURS} hours. Currently ${fbcH - btcH} hrs.`;
+      `Your BTC window must exceed their FBC window by at least ${MIN_DELTA_HOURS} hours. Currently ${btcH - fbcH} hrs.`;
     timelockNote.classList.remove("ok");
     timelockNote.classList.add("error");
   } else {
-    timelockNote.textContent = `Your funds refund ${btcH}h after broadcast; their FBC refund is ${fbcH}h.`;
+    timelockNote.textContent = `Their FBC refund opens at ${fbcH}h; yours opens later, at ${btcH}h — so you can never refund and claim both.`;
     timelockNote.classList.remove("error");
     timelockNote.classList.add("ok");
   }
@@ -404,9 +397,9 @@ function updateAliceBuildOfferEnabled() {
     alice.fbc &&
     amtBtcSat >= MIN_AMOUNT_BTC_SAT &&
     amtFbcDd >= MIN_AMOUNT_FBC_DOLLARYDOOS &&
-    btcH >= 1 &&
-    fbcH >= 2 &&
-    fbcH - btcH >= MIN_DELTA_HOURS;
+    btcH >= 2 &&
+    fbcH >= 1 &&
+    btcH - fbcH >= MIN_DELTA_HOURS;
   buildOfferBtn.disabled = !valid;
 }
 
@@ -427,7 +420,7 @@ async function resolveFundingVout(txid, address, statusEl) {
   let lastErr = null;
   for (let i = 0; i < TRIES; i++) {
     try {
-      const res = await fetch(`${BTC_API}/tx/${txid}`);
+      const res = await btcFetch(`/tx/${txid}`);
       if (res.ok) {
         const txData = await res.json();
         const idx = txData.vout.findIndex(
@@ -457,36 +450,13 @@ async function resolveFundingVout(txid, address, statusEl) {
 }
 
 async function fetchBtcTipHeight() {
-  const res = await fetch(`${BTC_API}/blocks/tip/height`);
+  const res = await btcFetch(`/blocks/tip/height`);
   if (!res.ok) throw new Error(`BTC tip fetch failed: ${res.status}`);
   const n = Number(await res.text());
   if (!Number.isInteger(n) || n < 0) throw new Error("invalid tip height");
   return n;
 }
 
-async function fetchBtcFeeRate() {
-  // Blockstream Esplora fee-estimates returns { "1": N, "3": N, "6": N, ... }
-  // where key = target blocks, value = sat/vB. Use target 3 (~30 min).
-  // Floor at 3 sat/vB: HTLC claims are time-sensitive and sub-1 sat/vB
-  // txs may never relay.
-  // Ceiling at 500 sat/vB: a Blockstream hiccup returning nonsense (or a
-  // real pathological fee market) shouldn't be able to drain a 50k-sat HTLC
-  // into fees. 500 sat/vB is already ~75k sats on a 150-vbyte claim, which
-  // exceeds the dust floor we enforce; if the real rate is above this the
-  // user should be signing manually with Sparrow anyway.
-  const FLOOR = 3;
-  const CEILING = 500;
-  try {
-    const res = await fetch(`${BTC_API}/fee-estimates`);
-    if (!res.ok) throw new Error(String(res.status));
-    const j = await res.json();
-    const rate = Number(j["3"]);
-    const chosen = rate > 0 && isFinite(rate) ? Math.ceil(rate) : 20;
-    return Math.min(Math.max(chosen, FLOOR), CEILING);
-  } catch {
-    return 20;
-  }
-}
 
 async function fetchFbcTipHeight() {
   const res = await fetch(`${FBC_API}/blocks?limit=1`);
@@ -625,7 +595,7 @@ document.getElementById("process-accept").addEventListener("click", async () => 
 document.getElementById("fund-btc").addEventListener("click", async () => {
   const statusEl = document.getElementById("btc-fund-status");
   try {
-    if (!window.unisat) throw new Error("BTC wallet not connected");
+    if (!btcWallet) throw new Error("BTC wallet not connected");
     // SPEC §5.1: if `expires_at` has passed, warn before funding. The offer
     // was built with a 1h expiry by default; Bob may have sat on the accept,
     // in which case Alice could be funding against an agreement Bob has
@@ -643,8 +613,20 @@ document.getElementById("fund-btc").addEventListener("click", async () => {
       }
     }
     const addr = btcHTLCAddress(alice.btcScript, BTC_NETWORK);
-    setFieldNote(statusEl, "Signing BTC funding tx in wallet…");
-    const txid = await window.unisat.sendBitcoin(addr, alice.offer.amount_btc);
+    // The counterparty will not fund their side until this confirms, and the
+    // refund timelock runs the whole time — so a wallet default aimed at
+    // "sometime today" stalls the swap. The rate is only a request; wallets
+    // that ignore it fall back to their own, which is why it is not fatal.
+    const fundFeeRate = await fetchBtcFeeRate().catch(() => null);
+    setFieldNote(
+      statusEl,
+      fundFeeRate
+        ? `Signing BTC funding tx in wallet (${fundFeeRate} sat/vB)…`
+        : "Signing BTC funding tx in wallet…",
+    );
+    const txid = await btcWallet.sendBitcoin(addr, alice.offer.amount_btc, {
+      feeRate: fundFeeRate,
+    });
     alice.btcFundedTxid = txid;
     // Unisat only returns the txid — it does not guarantee which output
     // index is the HTLC. Poll Blockstream until the tx appears so we can
@@ -731,18 +713,7 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
       network: BTC_NETWORK,
     });
 
-    const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
-      autoFinalized: false,
-      toSignInputs: [
-        {
-          index: 0,
-          address: alice.btc.address,
-          publicKey: alice.btc.pubkey,
-          sighashTypes: [1],
-          disableTweakSigner: true,
-        },
-      ],
-    });
+    const signedPsbtHex = await btcWallet.signPsbt(psbtHex, { address: alice.btc.address, pubkey: alice.btc.pubkey });
 
     const { rawTxHex, txid } = finalizeHTLCSpend({
       signedPsbtHex,
@@ -750,7 +721,7 @@ document.getElementById("refund-btc").addEventListener("click", async () => {
       branch: "refund",
     });
 
-    const broadcastTxid = await window.unisat.pushTx(rawTxHex);
+    const broadcastTxid = await btcWallet.pushTx(rawTxHex);
     renderTxStatus(statusEl, {
       label: "BTC refund broadcast.",
       txid: broadcastTxid || txid,
@@ -838,7 +809,7 @@ document.getElementById("btc-connect-bob").addEventListener("click", async () =>
   const statusEl = document.getElementById("btc-status-bob");
   try {
     setStatus(statusEl, "connecting…", null);
-    bob.btc = await connectUnisat();
+    bob.btc = await connectBtcWallet();
     setStatus(statusEl, bob.btc.address, "connected");
     updateBobButtons();
   } catch (err) {
@@ -937,6 +908,33 @@ document.getElementById("fund-fbc").addEventListener("click", async () => {
     if (funded.kind !== "funded_btc") throw new Error("not a funded_btc blob");
     const v = verifyFundedBtc(bob.offer, bob.accept, funded);
     if (!v.ok) throw new Error(`funded_btc verification failed: ${v.reason}`);
+
+    // The blob being self-consistent with the offer says nothing about the
+    // chain — it can name any transaction in existence. Confirm the outpoint
+    // it points at really pays this swap's HTLC address, for this swap's
+    // amount, before committing FBC against it.
+    const { btc: btcParams } = htlcsFromOfferAccept(bob.offer, bob.accept);
+    const expectedBtcAddr = btcHTLCAddress(buildHTLCScript(btcParams), BTC_NETWORK);
+    const onChain = await fetchBtcOutput(funded.funding_txid, funded.funding_vout);
+    if (!onChain) {
+      throw new Error(
+        `Could not read ${funded.funding_txid}:${funded.funding_vout} on the BTC chain. ` +
+          `Do not fund FBC until it is visible.`,
+      );
+    }
+    if (onChain.address !== expectedBtcAddr) {
+      throw new Error(
+        `That outpoint pays ${onChain.address}, not this swap's HTLC address ` +
+          `${expectedBtcAddr}. Do NOT fund FBC.`,
+      );
+    }
+    if (onChain.value !== bob.offer.amount_btc) {
+      throw new Error(
+        `That outpoint holds ${onChain.value} sat, but the offer is for ` +
+          `${bob.offer.amount_btc} sat. Do NOT fund FBC.`,
+      );
+    }
+
     // Keep the verified funded_btc around — Bob needs its txid, vout,
     // amount, and script to build the claim PSBT in step 5.
     bob.btcFunded = funded;
@@ -1068,18 +1066,7 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
     // toSignInputs with explicit pubkey AND disableTweakSigner=true (the
     // tweak signer path is for Taproot; forcing it off tells Unisat to
     // produce a plain ECDSA signature, which is what CHECKSIG expects).
-    const signedPsbtHex = await window.unisat.signPsbt(psbtHex, {
-      autoFinalized: false,
-      toSignInputs: [
-        {
-          index: 0,
-          address: bob.btc.address,
-          publicKey: bob.btc.pubkey,
-          sighashTypes: [1],
-          disableTweakSigner: true,
-        },
-      ],
-    });
+    const signedPsbtHex = await btcWallet.signPsbt(psbtHex, { address: bob.btc.address, pubkey: bob.btc.pubkey });
 
     const { rawTxHex, txid } = finalizeHTLCSpend({
       signedPsbtHex,
@@ -1088,7 +1075,7 @@ document.getElementById("claim-btc").addEventListener("click", async () => {
       preimage,
     });
 
-    const broadcastTxid = await window.unisat.pushTx(rawTxHex);
+    const broadcastTxid = await btcWallet.pushTx(rawTxHex);
     renderTxStatus(statusEl, {
       label: "BTC claim broadcast.",
       txid: broadcastTxid || txid,
@@ -1175,7 +1162,7 @@ document.getElementById("sign-with-wif").addEventListener("click", async () => {
     // Discard the WIF from the DOM immediately; we don't need it again.
     wifInput.value = "";
 
-    const res = await fetch(`${BTC_API}/tx`, {
+    const res = await btcFetch(`/tx`, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: rawTxHex,
@@ -1211,7 +1198,7 @@ document.getElementById("finalize-external").addEventListener("click", async () 
       preimage: bob.externalPreimage,
     });
     // Broadcast via Blockstream Esplora since Unisat may not cooperate.
-    const res = await fetch(`${BTC_API}/tx`, {
+    const res = await btcFetch(`/tx`, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: rawTxHex,
@@ -1649,8 +1636,8 @@ async function checkFbcConfirmations(txid) {
 async function checkBtcConfirmations(txid) {
   try {
     const [statusRes, tipRes] = await Promise.all([
-      fetch(`https://blockstream.info/api/tx/${txid}/status`),
-      fetch(`https://blockstream.info/api/blocks/tip/height`),
+      btcFetch(`/tx/${txid}/status`),
+      btcFetch(`/blocks/tip/height`),
     ]);
     const status = statusRes.ok ? await statusRes.json() : null;
     const tip = tipRes.ok ? Number(await tipRes.text()) : null;
@@ -1747,6 +1734,25 @@ function startBobFbcRefundCountdown() {
 const activePreimageWatches = new Set();
 function startPreimageAutoExtract() {
   if (!bob.fbcFundedTxid || !bob.fbcScript) return;
+
+  // The hashlock comes from our own FBC witness script, not from anything the
+  // explorer says. It is what turns "an explorer returned 64 hex characters"
+  // into "this is the secret", and without it a stale or hostile response
+  // would light up the claim button for a preimage that cannot spend.
+  //
+  // `.scriptBytes`, not the object: buildHTLCScript returns
+  // {params, scriptBytes, fbcCommitment, btcCommitment}, and parseHTLCScript
+  // takes raw bytes. Passing the object does not throw — `undefined.length`
+  // comparisons are both false so the length guard lets it through, and it
+  // dies one line later returning null — which silently disabled this entire
+  // watch. fbcHTLCAddress below takes the object; the two APIs differ.
+  const parsedFbc = parseHTLCScript(bob.fbcScript.scriptBytes);
+  if (!parsedFbc) return;
+  const expectedHashlockHex = toHex(parsedFbc.hashlock);
+
+  // Claim the dedupe key only once the watch is actually going to start.
+  // Reserving it above the guards means a single failed attempt blocks every
+  // later retry for the life of the page.
   const key = `${bob.fbcFundedTxid}:${bob.fbcFundedVout}`;
   if (activePreimageWatches.has(key)) return;
   activePreimageWatches.add(key);
@@ -1758,6 +1764,7 @@ function startPreimageAutoExtract() {
     bob.fbcFundedTxid,
     bob.fbcFundedVout,
     addr,
+    expectedHashlockHex,
     ({ preimageHex, spendingTxid }) => {
       activePreimageWatches.delete(key);
       if (!preimageInput) return;
@@ -2006,7 +2013,11 @@ function hydrate(role, data) {
       alice.accept = data.accept;
       document.getElementById("accept-blob-in").value = encodeBlob(data.accept);
       if (data.offer) {
-        const { btc, fbc } = htlcsFromOfferAccept(data.offer, data.accept);
+        // Recovery, not entry: this swap's coins may already be locked, so the
+        // scripts must be rebuildable even if its timelocks no longer satisfy
+        // current policy. Otherwise correcting the Δ rule would strand every
+        // in-flight swap, refund path included.
+        const { btc, fbc } = htlcParamsForRecovery(data.offer, data.accept);
         alice.btcScript = buildHTLCScript(btc);
         alice.fbcScript = buildHTLCScript(fbc);
         const btcAddr = btcHTLCAddress(alice.btcScript, BTC_NETWORK);

@@ -1,0 +1,45 @@
+[Unit]
+Description=Fistbump maker registry (discovery)
+After=network.target
+
+[Service]
+Type=simple
+# The shipped deployment runs as root. A dedicated unprivileged user is
+# better practice, but the unit must match the host it is installed on —
+# specifying a user that does not exist fails with 217/USER and takes the
+# service down on deploy, which is how this was found.
+User=root
+Group=root
+WorkingDirectory=/opt/fistbump/maker-registry
+Environment=REGISTRY_HOST=127.0.0.1
+Environment=REGISTRY_PORT=8790
+Environment=REGISTRY_DATA=/var/lib/fistbump-maker-registry/makers.json
+Environment=REGISTRY_TTL_SEC=90
+Environment=REGISTRY_CORS=https://swap.fistbump.org,http://127.0.0.1:8766,http://localhost:8766
+# Never verify a maker at a loopback/private address in production: the URL is
+# supplied by an untrusted announce, and this host runs bitcoind/fbd/Apache.
+Environment=REGISTRY_ALLOW_HTTP_LOCAL=0
+# Apache is the only hop in front of us, so its X-Forwarded-For is the only one worth reading.
+Environment=REGISTRY_TRUSTED_PROXIES=127.0.0.1,::1
+Environment=REGISTRY_ANNOUNCE_QUOTA=20
+Environment=REGISTRY_ANNOUNCE_WINDOW_SEC=60
+# Occupancy caps. MAX_MAKERS on its own is one wildcard DNS record away from
+# full, so what an announcer may hold is capped per token and per source
+# network; a full table then evicts the least-recently-seen entry.
+Environment=REGISTRY_MAX_MAKERS=200
+Environment=REGISTRY_MAX_PER_CREDENTIAL=4
+Environment=REGISTRY_MAX_PER_NETWORK=8
+# Verifications in flight. Each holds a worker thread on an outbound fetch and
+# ThreadingHTTPServer starts threads without a ceiling.
+Environment=REGISTRY_VERIFY_CONCURRENCY=16
+# Verified trade history. Setting the path is what turns it on: the registry
+# then polls each live maker for settled swaps, checks every one against both
+# chains, and serves /v1/price and /v1/trades from what survives.
+Environment=REGISTRY_TRADES_DB=/var/lib/fistbump-maker-registry/trades.db
+Environment=REGISTRY_TRADES_POLL_SEC=300
+ExecStart=/usr/bin/python3 /opt/fistbump/maker-registry/registry.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1419 @@
+/*
+ * auto — the automated swap page
+ */
+
+.auto-page .auto-main {
+  min-height: calc(100vh - 56px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px 80px;
+}
+
+/* One column, wider than the original 420. The card now carries the price
+   header and two drawers, and 420 made every row feel cramped. */
+.auto-center {
+  width: 100%;
+  max-width: 520px;
+}
+
+/* Public WIP warning */
+.wip-banner {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: calc(var(--fb-radius) + 2px);
+  border: 1px solid rgba(240, 180, 41, 0.35);
+  background: rgba(240, 180, 41, 0.1);
+  color: #f5d78e;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+}
+.wip-banner strong {
+  display: block;
+  color: #f0b429;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.swap-card,
+.progress-card {
+  background: rgba(24, 24, 27, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(87, 199, 237, 0.12);
+  border-radius: calc(var(--fb-radius-lg) + 4px);
+  padding: 20px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.quotes-section {
+  margin: 20px 0 16px;
+}
+.quotes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fb-text-dim);
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.linkish {
+  background: none;
+  border: none;
+  color: var(--fb-accent);
+  font-family: var(--fb-font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  padding: 4px 0;
+  opacity: 0.9;
+}
+.linkish:hover { opacity: 1; text-decoration: underline; }
+
+.quote-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 1px; /* avoid clip of focus ring */
+}
+.quote-empty {
+  font-size: var(--fb-text-sm);
+  color: var(--fb-text-dim);
+  padding: 18px 14px;
+  text-align: center;
+  border: 1px dashed rgba(87, 199, 237, 0.18);
+  border-radius: var(--fb-radius);
+  line-height: 1.45;
+}
+
+/* ── Maker quote card ── */
+.qcard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(87, 199, 237, 0.12);
+  border-radius: calc(var(--fb-radius) + 2px);
+  background: rgba(9, 9, 11, 0.55);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--fb-font-sans);
+  color: var(--fb-text);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+.qcard:hover:not(:disabled) {
+  border-color: rgba(87, 199, 237, 0.35);
+  background: rgba(12, 12, 16, 0.75);
+}
+.qcard.selected {
+  border-color: rgba(87, 199, 237, 0.5);
+  background: rgba(14, 18, 22, 0.9);
+  box-shadow: 0 0 0 1px rgba(87, 199, 237, 0.15);
+}
+.qcard:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+}
+.qcard:focus-visible {
+  outline: 2px solid rgba(87, 199, 237, 0.55);
+  outline-offset: 2px;
+}
+
+.qcard-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.qcard-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.qcard-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qcard-host {
+  flex-shrink: 0;
+  font-family: var(--fb-font-mono);
+  font-size: 10px;
+  color: var(--fb-text-dim);
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.qcard-mid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qcard-out-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fb-text-dim);
+  font-weight: 600;
+}
+.qcard-out {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.qcard-out-num {
+  font-family: var(--fb-font-mono);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--fb-accent);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.qcard-out-unit {
+  font-family: var(--fb-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fb-accent);
+  opacity: 0.75;
+}
+.qcard-out.muted .qcard-out-num,
+.qcard.offline .qcard-out-num {
+  color: var(--fb-text-dim);
+}
+.qcard.offline .qcard-out-unit { color: var(--fb-text-dim); }
+
+.qcard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.qcard-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fb-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 3px 9px;
+  line-height: 1.3;
+}
+.qcard-tag.mono {
+  font-family: var(--fb-font-mono);
+  font-size: 10px;
+  letter-spacing: -0.01em;
+}
+.qcard-tag.warn {
+  color: #f0b429;
+  border-color: rgba(240, 180, 41, 0.25);
+  background: rgba(240, 180, 41, 0.08);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qcard-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.qcard-badge.best {
+  background: rgba(87, 199, 237, 0.16);
+  color: var(--fb-accent);
+  border: 1px solid rgba(87, 199, 237, 0.28);
+}
+.qcard-badge.off {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fb-text-dim);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+/* A maker that answered and declined. Warmer than `off` on purpose: it is up
+   and talking to us, and the reason it gives is usually actionable. */
+.qcard-badge.declined {
+  background: rgba(226, 173, 84, 0.14);
+  color: #e2ad54;
+  border: 1px solid rgba(226, 173, 84, 0.26);
+}
+
+.qcard.declined { opacity: 0.9; }
+.qcard-reason {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fb-text-dim);
+  /* Maker-supplied text: cap it so a long or hostile message cannot stretch
+     the card or push the rest of the list off screen. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.hidden,
+[hidden] { display: none !important; }
+
+/* ── Saved multi-swap sessions (localStorage) ── */
+.sessions-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(87, 199, 237, 0.1);
+}
+.sessions-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.sessions-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sessions-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fb-text-dim);
+  font-weight: 600;
+}
+.sessions-count {
+  font-family: var(--fb-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fb-accent);
+  background: rgba(87, 199, 237, 0.1);
+  border: 1px solid rgba(87, 199, 237, 0.2);
+  border-radius: 999px;
+  padding: 2px 8px;
+  line-height: 1.3;
+}
+.sessions-count:empty { display: none; }
+.sessions-hint {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fb-text-dim);
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(87, 199, 237, 0.12);
+  border-radius: calc(var(--fb-radius) + 2px);
+  background: rgba(9, 9, 11, 0.55);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.session-card:hover {
+  border-color: rgba(87, 199, 237, 0.28);
+  background: rgba(12, 12, 16, 0.72);
+}
+.session-card.is-claimable {
+  border-color: rgba(87, 199, 237, 0.4);
+  box-shadow: 0 0 0 1px rgba(87, 199, 237, 0.12);
+}
+.session-card.is-done {
+  opacity: 0.78;
+}
+.session-card.is-error {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.session-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.session-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  line-height: 1.25;
+  border: 1px solid transparent;
+}
+.session-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.session-pill.tone-wait {
+  color: var(--fb-accent);
+  background: rgba(87, 199, 237, 0.12);
+  border-color: rgba(87, 199, 237, 0.22);
+}
+.session-pill.tone-wait::before {
+  animation: auto-pulse 1.6s ease infinite;
+}
+.session-pill.tone-fund {
+  color: #f0b429;
+  background: rgba(240, 180, 41, 0.1);
+  border-color: rgba(240, 180, 41, 0.25);
+}
+.session-pill.tone-claim {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.28);
+}
+.session-pill.tone-done {
+  color: var(--fb-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.session-pill.tone-fail {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.25);
+}
+.session-id {
+  font-size: 10px;
+  color: var(--fb-text-dim);
+  opacity: 0.9;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-amounts {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 8px;
+}
+.session-amt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.session-amt:last-child {
+  text-align: right;
+  align-items: flex-end;
+}
+.session-amt-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fb-text-dim);
+  font-weight: 600;
+}
+.session-amt-val {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fb-text);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.session-amt:last-child .session-amt-val {
+  justify-content: flex-end;
+}
+.session-amt-val .unit {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fb-text-dim);
+}
+.session-amt-val.accent {
+  color: var(--fb-accent);
+}
+.session-amt-val.accent .unit {
+  color: var(--fb-accent);
+  opacity: 0.75;
+}
+.session-amt-arrow {
+  color: var(--fb-text-dim);
+  font-size: 14px;
+  padding-bottom: 2px;
+  opacity: 0.7;
+}
+
+.session-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.session-tag {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fb-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 3px 9px;
+  line-height: 1.3;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.session-progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.session-progress-label {
+  font-size: 11px;
+  color: var(--fb-text-muted);
+  font-weight: 500;
+}
+.session-progress-pct {
+  font-size: 10px;
+  color: var(--fb-text-dim);
+}
+.session-progress-sub {
+  font-size: 10px;
+  color: var(--fb-text-dim);
+  opacity: 0.9;
+  text-align: right;
+  flex-shrink: 0;
+}
+.session-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.session-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(87, 199, 237, 0.55), var(--fb-accent));
+  transition: width 0.35s ease;
+  min-width: 0;
+}
+.session-bar-fill.dim {
+  background: rgba(240, 180, 41, 0.55);
+}
+.session-progress.claim-ready .session-progress-label {
+  color: #4ade80;
+}
+.session-progress.claim-ready .session-bar-fill {
+  background: linear-gradient(90deg, rgba(74, 222, 128, 0.5), #4ade80);
+}
+.session-progress.done-line .session-progress-label {
+  color: var(--fb-text-dim);
+  font-family: var(--fb-font-mono);
+  font-size: 10px;
+}
+
+.session-err {
+  font-size: 11px;
+  color: #fca5a5;
+  line-height: 1.4;
+  padding: 8px 10px;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.18);
+  border-radius: var(--fb-radius);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.session-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+.session-resume {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--fb-radius);
+}
+.session-hide {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--fb-text-dim);
+  font-family: var(--fb-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 4px;
+  opacity: 0.85;
+}
+.session-hide:hover {
+  color: var(--fb-text-muted);
+  text-decoration: underline;
+  opacity: 1;
+}
+.session-done-note {
+  flex: 1;
+  font-size: 12px;
+  color: var(--fb-text-dim);
+  font-weight: 500;
+}
+
+.side-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(9, 9, 11, 0.5);
+  border: 1px solid rgba(87, 199, 237, 0.08);
+  border-radius: calc(var(--fb-radius) + 2px);
+  margin-bottom: 20px;
+}
+.side-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--fb-radius);
+  padding: 12px 14px;
+  font-family: var(--fb-font-sans);
+  font-size: var(--fb-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--fb-text-muted);
+  text-align: center;
+  transition: all 0.15s;
+}
+.side-btn:hover { color: var(--fb-text); }
+.side-btn[aria-selected="true"] {
+  background: var(--fb-bg-card);
+  border-color: rgba(87, 199, 237, 0.22);
+  color: var(--fb-text);
+  font-weight: 600;
+}
+
+.amount-block { margin-bottom: 4px; }
+.amount-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--fb-text-sm);
+  color: var(--fb-text-muted);
+  margin-bottom: 8px;
+}
+.amount-asset {
+  font-family: var(--fb-font-mono);
+  font-size: var(--fb-text-xs);
+  color: var(--fb-text-dim);
+}
+.amount-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--fb-bg-input);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius);
+  padding: 4px 4px 4px 14px;
+  transition: border-color 0.15s;
+}
+.amount-row:focus-within {
+  border-color: rgba(87, 199, 237, 0.45);
+}
+.amount-row input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fb-text);
+  font-family: var(--fb-font-mono);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  padding: 10px 0;
+  height: auto;
+  box-shadow: none;
+}
+.amount-row input::-webkit-outer-spin-button,
+.amount-row input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.amount-row input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.amount-chip {
+  flex-shrink: 0;
+  font-family: var(--fb-font-mono);
+  font-size: var(--fb-text-sm);
+  font-weight: 600;
+  color: var(--fb-text);
+  background: rgba(87, 199, 237, 0.1);
+  border: 1px solid rgba(87, 199, 237, 0.16);
+  border-radius: calc(var(--fb-radius) - 2px);
+  padding: 8px 12px;
+}
+/*
+ * Both amounts are inputs and each drives the other, so they get identical
+ * treatment — the receive side is no longer a read-only display and styling it
+ * as one would say it cannot be typed in.
+ *
+ * `.pending` marks a number that is an ESTIMATE from the last known rate
+ * rather than a quote from a maker. Dimmed rather than hidden: it is the right
+ * order of magnitude and useful while typing, and it resolves to the real
+ * figure within a few hundred milliseconds.
+ */
+.amount-row input.pending { color: var(--fb-text-dim); }
+.field-hint {
+  font-size: var(--fb-text-xs);
+  color: var(--fb-text-dim);
+  margin: 8px 2px 0;
+  min-height: 1.2em;
+}
+.field-hint.error { color: var(--fb-red); }
+
+.swap-arrow {
+  display: flex;
+  justify-content: center;
+  color: var(--fb-text-dim);
+  padding: 10px 0;
+}
+
+.quote-panel {
+  margin: 18px 0 20px;
+  padding: 12px 14px;
+  background: rgba(9, 9, 11, 0.45);
+  border: 1px solid rgba(87, 199, 237, 0.08);
+  border-radius: var(--fb-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.quote-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: var(--fb-text-sm);
+  color: var(--fb-text-muted);
+}
+.quote-row .mono {
+  font-family: var(--fb-font-mono);
+  font-size: var(--fb-text-xs);
+  color: var(--fb-text);
+  text-align: right;
+}
+.quote-expiry .mono { color: var(--fb-accent); }
+
+.swap-cta {
+  width: 100%;
+  padding: 16px 20px;
+  font-size: var(--fb-text-base);
+  font-weight: 600;
+  border-radius: var(--fb-radius);
+}
+.swap-cta:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Progress */
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.progress-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1.25;
+}
+.btn.ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fb-text-dim);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--fb-radius);
+}
+.btn.ghost:hover {
+  color: var(--fb-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.progress-summary {
+  margin-bottom: 22px;
+  padding: 12px 14px;
+  background: rgba(9, 9, 11, 0.5);
+  border: 1px solid rgba(87, 199, 237, 0.1);
+  border-radius: calc(var(--fb-radius) + 2px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.progress-summary.plain {
+  font-size: 12px;
+  color: var(--fb-text-muted);
+  font-family: var(--fb-font-mono);
+  line-height: 1.45;
+}
+.progress-summary-amts {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 8px;
+}
+.progress-summary-side {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.progress-summary-side.recv {
+  text-align: right;
+  align-items: flex-end;
+}
+.ps-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fb-text-dim);
+  font-weight: 600;
+}
+.ps-val {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fb-text);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.ps-val.accent { color: var(--fb-accent); }
+.ps-unit {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fb-text-dim);
+}
+.ps-val.accent .ps-unit {
+  color: var(--fb-accent);
+  opacity: 0.75;
+}
+.progress-summary-arrow {
+  color: var(--fb-text-dim);
+  font-size: 13px;
+  padding-bottom: 2px;
+  opacity: 0.65;
+}
+.progress-summary-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.progress-summary-via {
+  font-size: 11px;
+  color: var(--fb-text-muted);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progress-summary-via::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fb-accent);
+  margin-right: 6px;
+  vertical-align: 1px;
+  opacity: 0.85;
+}
+.progress-summary-id {
+  font-size: 10px;
+  color: var(--fb-text-dim);
+  flex-shrink: 0;
+}
+
+/* Focused progress (not a long wizard list) */
+.progress-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prog-track {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prog-segs {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+.prog-seg {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  transition: background 0.25s ease;
+}
+.prog-seg.done {
+  background: var(--fb-accent);
+}
+.prog-seg.active {
+  background: rgba(87, 199, 237, 0.45);
+  box-shadow: 0 0 0 1px rgba(87, 199, 237, 0.25);
+  animation: auto-pulse 1.8s ease infinite;
+}
+.prog-track-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--fb-text-dim);
+  font-weight: 500;
+}
+.prog-track-meta .mono {
+  font-size: 10px;
+  color: var(--fb-text-muted);
+}
+
+.prog-done-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--fb-radius);
+  background: rgba(87, 199, 237, 0.05);
+  border: 1px solid rgba(87, 199, 237, 0.1);
+}
+.prog-done-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fb-accent);
+  background: rgba(87, 199, 237, 0.12);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+.prog-done-list {
+  font-size: 11px;
+  color: var(--fb-text-muted);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.prog-done-dot {
+  margin: 0 5px;
+  color: var(--fb-text-dim);
+  opacity: 0.7;
+}
+
+.prog-focus {
+  padding: 16px 14px;
+  border-radius: calc(var(--fb-radius) + 2px);
+  background: rgba(9, 9, 11, 0.55);
+  border: 1px solid rgba(87, 199, 237, 0.16);
+  box-shadow: 0 0 0 1px rgba(87, 199, 237, 0.04);
+}
+.prog-focus.is-complete {
+  border-color: rgba(74, 222, 128, 0.25);
+  background: rgba(74, 222, 128, 0.05);
+}
+.prog-focus-kicker {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fb-accent);
+  margin-bottom: 6px;
+}
+.prog-focus.is-complete .prog-focus-kicker {
+  color: #4ade80;
+}
+.prog-focus-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fb-text);
+  line-height: 1.25;
+  margin-bottom: 10px;
+}
+.prog-focus-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fb-text-muted);
+  font-weight: 400;
+}
+.prog-focus-chip {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--fb-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 6px 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prog-conf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prog-conf-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.prog-conf-nums {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--fb-text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.prog-conf-nums .sep,
+.prog-conf-nums .max {
+  color: var(--fb-text-dim);
+  font-weight: 500;
+  font-size: 16px;
+}
+.prog-conf-sub {
+  font-size: 11px;
+  color: var(--fb-text-dim);
+  text-align: right;
+  line-height: 1.3;
+}
+.prog-conf-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.prog-conf-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(87, 199, 237, 0.45), var(--fb-accent));
+  transition: width 0.4s ease;
+  min-width: 0;
+}
+
+.prog-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--fb-text-dim);
+}
+.prog-next-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fb-text-dim);
+  opacity: 0.85;
+}
+.prog-next-step {
+  color: var(--fb-text-muted);
+  font-weight: 500;
+}
+
+@keyframes auto-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.progress-action {
+  margin-top: 22px;
+}
+.progress-action .btn {
+  width: 100%;
+  padding: 14px 18px;
+  font-weight: 600;
+  border-radius: var(--fb-radius);
+}
+
+.progress-done {
+  margin-top: 20px;
+  text-align: center;
+  padding: 18px 12px 4px;
+}
+.done-icon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--fb-accent);
+  color: #0a0a0b;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+.progress-done h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--fb-text-muted);
+}
+.progress-done .btn { width: 100%; }
+
+.mono { font-family: var(--fb-font-mono); }
+
+/* Recovery action on a session card. Deliberately quieter than Resume — it is
+   the escape hatch, not the happy path — but not hidden, because a taker whose
+   maker vanished has no other way to get their coins back. */
+.session-recover {
+  background: none;
+  border: 1px solid var(--border, #3a3a3a);
+  color: var(--text-dim, #9a9a9a);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.session-recover:hover:not(:disabled) {
+  color: var(--text, #e8e8e8);
+  border-color: var(--text-dim, #9a9a9a);
+}
+.session-recover:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Unsigned-PSBT escape hatch. Shown when a wallet refuses an HTLC spend —
+   which is the normal outcome for hardware wallets and some Unisat builds —
+   so it has to read as a route forward, not as an error dump. */
+.psbt-panel {
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 8px;
+  background: var(--surface-2, #17171a);
+}
+.psbt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.psbt-title { font-weight: 600; font-size: 0.92rem; }
+.psbt-note {
+  margin: 0.45rem 0 0.6rem;
+  font-size: 0.82rem;
+  color: var(--text-dim, #9a9a9a);
+  line-height: 1.45;
+}
+.psbt-text {
+  width: 100%;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  word-break: break-all;
+  resize: vertical;
+  background: var(--surface, #0f0f11);
+  color: var(--text, #e8e8e8);
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+.psbt-details { margin-top: 0.6rem; font-size: 0.8rem; }
+.psbt-details summary { cursor: pointer; color: var(--text-dim, #9a9a9a); }
+.psbt-steps { margin: 0.5rem 0 0; padding-left: 1.1rem; line-height: 1.6; }
+.psbt-steps code { font-size: 0.75rem; }
+
+/* ── Price header ─────────────────────────────────────────────────────── */
+/*
+ * Top of the swap card. Read before the form, framing the number about to be
+ * typed into it.
+ */
+.price-header {
+  margin: -20px -20px 18px;
+  padding: 17px 20px 15px;
+  border-bottom: 1px solid rgba(87, 199, 237, 0.12);
+  background: rgba(87, 199, 237, 0.04);
+  border-radius: calc(var(--fb-radius-lg) + 3px) calc(var(--fb-radius-lg) + 3px) 0 0;
+}
+.price-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--fb-text-dim);
+  font-weight: 600;
+  margin-bottom: 7px;
+}
+.price-main { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.price-usd {
+  font-family: var(--fb-font-mono);
+  font-size: clamp(30px, 8vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  color: var(--fb-text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.price-unit {
+  font-size: 12px; font-weight: 600;
+  color: var(--fb-text-dim); letter-spacing: 0.05em;
+}
+.price-meta { margin-top: 6px; font-size: 12px; color: var(--fb-text-dim); }
+.price-meta .mono { font-family: var(--fb-font-mono); color: var(--fb-text-muted); }
+.price-dot { opacity: 0.45; margin: 0 4px; }
+
+/* ── Quote terms ──────────────────────────────────────────────────────── */
+/* One line. Four labelled cells were a third of the card to say very little. */
+.quote-terms {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--fb-text-dim);
+  margin-top: 4px;
+  padding: 12px 0 14px;
+  border-top: 1px solid rgba(87, 199, 237, 0.1);
+}
+.quote-terms .mono { font-family: var(--fb-font-mono); color: var(--fb-text-muted); }
+.quote-terms-right { white-space: nowrap; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ── Resume callout ───────────────────────────────────────────────────── */
+/*
+ * Only rendered when a swap is actually running. It is deliberately the
+ * loudest thing on the page in that state: an unfinished swap has timelocks,
+ * so "it is in a tab" is not good enough. Rendering nothing when there is
+ * nothing keeps it from becoming furniture people learn to skip.
+ */
+.resume-callout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: calc(var(--fb-radius) + 2px);
+  border: 1px solid rgba(87, 199, 237, 0.35);
+  background: rgba(87, 199, 237, 0.09);
+  color: var(--fb-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.resume-callout:hover { background: rgba(87, 199, 237, 0.14); border-color: rgba(87, 199, 237, 0.5); }
+.resume-callout:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: 2px; }
+.resume-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--fb-accent); flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(87, 199, 237, 0.18);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .resume-dot { animation: resume-pulse 2.4s ease-in-out infinite; }
+}
+@keyframes resume-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(87, 199, 237, 0.18); }
+  50%      { box-shadow: 0 0 0 6px rgba(87, 199, 237, 0.06); }
+}
+.resume-text { flex: 1; min-width: 0; }
+.resume-go { color: var(--fb-accent); font-size: 12px; white-space: nowrap; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 18px 0 0;
+  border-bottom: 1px solid var(--fb-border);
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fb-text-dim);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 10px 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: color 0.12s, border-color 0.12s;
+}
+.tab:hover { color: var(--fb-text-muted); }
+.tab[aria-selected="true"] { color: var(--fb-accent); border-bottom-color: var(--fb-accent); }
+.tab:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: -2px; border-radius: 4px; }
+.tab-count {
+  font-family: var(--fb-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(87, 199, 237, 0.14);
+  color: var(--fb-accent);
+  border: 1px solid rgba(87, 199, 237, 0.24);
+}
+
+.tabpanel {
+  background: rgba(24, 24, 27, 0.55);
+  border: 1px solid var(--fb-border);
+  border-top: 0;
+  border-radius: 0 0 calc(var(--fb-radius-lg) + 2px) calc(var(--fb-radius-lg) + 2px);
+  padding: 16px;
+}
+.panel-actions { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+
+/* ── Market panel ─────────────────────────────────────────────────────── */
+
+.market-trades { max-height: 280px; overflow-y: auto; }
+.market-trade {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(87, 199, 237, 0.08);
+  font-size: 12.5px;
+}
+.market-trade:last-child { border-bottom: 0; }
+.market-trade-when { color: var(--fb-text-dim); white-space: nowrap; }
+.market-trade-size {
+  font-family: var(--fb-font-mono); color: var(--fb-text);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+.market-trade-px {
+  font-family: var(--fb-font-mono); color: var(--fb-accent);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.market-note {
+  font-size: 11.5px; line-height: 1.5; color: var(--fb-text-dim); margin: 12px 0 0;
+}
+.market-empty { font-size: 12.5px; color: var(--fb-text-dim); padding: 8px 0; }
+
+/* The sessions block lives inside a tab panel now, so it owns no chrome. */
+.tabpanel .sessions-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* The chosen provider doubles as the way to change it. Styled as text with an
+   underline on hover rather than a button, so it reads as part of the terms
+   line — but it is a real <button>, so it is keyboard reachable. */
+.via-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--fb-text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(161, 161, 170, 0.35);
+  text-underline-offset: 2px;
+}
+.via-btn:hover { color: var(--fb-accent); text-decoration-color: currentColor; }
+.via-btn:focus-visible { outline: 2px solid var(--fb-accent); outline-offset: 2px; border-radius: 3px; }
+
+/* Per-provider price, under the FBC amount on each maker card. */
+.qcard-price {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--fb-text-dim);
+  font-family: var(--fb-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.qcard-worse {
+  color: #e2ad54;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* A swap that has happened but is not yet buried. Dimmed and italicised rather
+   than coloured: it is not a warning, it is a row that is not finished being
+   true yet, and it must not compete with the settled prices beside it. */
+.market-trade.pending { opacity: 0.62; }
+.market-trade-settling {
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: var(--fb-text-dim, #a1a1aa);
+}

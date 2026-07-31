@@ -19,7 +19,11 @@ Nothing in this document involves a custodian, matching engine, or server-side s
 - `B_btc`, `B_fbc` — Bob's BTC and FBC compressed secp256k1 public keys.
 - `T1` — absolute BTC block height at which Alice can refund her BTC HTLC.
 - `T2` — absolute FBC block height at which Bob can refund his FBC HTLC.
-- `Δ` — safety buffer between the two timelocks. **Required:** `T2 ≥ T1 + Δ` (in wall-clock seconds).
+- `Δ` — safety buffer between the two timelocks. **Required:** `T1 ≥ T2 + Δ` (in wall-clock seconds).
+
+The direction of that inequality is the single most important rule in this document. Alice
+funds first and is the only party who knows `s`, so **Alice's refund must be the last thing
+that becomes possible**, not the first. See §4.2.
 
 All hashes are SHA-256 unless explicitly noted. Signatures are secp256k1 ECDSA, SIGHASH_ALL.
 
@@ -69,7 +73,9 @@ SHA-256 is used on both chains for the hashlock even though FBC's native hash fo
    - After T2:  Bob refunds FBC via REFUND branch.
 ```
 
-Two terminal states: both claim (success), or both refund (either-side abort). The asymmetric timelocks (`T1 < T2`) guarantee that whichever honest party is last to act still has time to move after observing their counterparty's on-chain action.
+Two terminal states: both claim (success), or both refund (either-side abort). The asymmetric timelocks (`T2 < T1`) guarantee that whichever honest party is last to act still has time to move after observing their counterparty's on-chain action.
+
+Concretely: Alice must claim the FBC HTLC before `T2` or Bob refunds it. The moment she claims, `s` is public and Bob has the whole interval `[T2, T1)` — at least `Δ` — to claim the BTC HTLC before Alice's refund branch opens. Alice can never be in a position to both refund her BTC and still claim the FBC, because her BTC refund only becomes valid after Bob's FBC refund already has.
 
 ---
 
@@ -115,7 +121,16 @@ OP_ENDIF
 68                         # OP_ENDIF
 ```
 
-Total script size: approximately 97–103 bytes depending on the timelock push encoding.
+**Total script size: 114 bytes** for any mainnet-scale height. Everything except the
+locktime is fixed at 110 bytes (`63 a8 20` + 32 + `88 21` + 33 + `ac 67` … `b1 75 21` + 33
++ `ac 68`); the locktime contributes its 1-byte push opcode plus 1–4 value bytes. Both
+chains' heights (BTC ~9×10⁵, FBC ~2–7×10⁵) sit in the 3-byte CScriptNum range, hence 114.
+
+Across the whole legal CLTV height range (1 … 499,999,999) the script spans **112–115
+bytes**. A 5-byte push cannot occur: 4 bytes already encode up to 2,147,483,647, which is
+past the 500,000,000 height/timestamp boundary of §4.1. A parser that accepts a wider range
+than 112–115 is not wrong, but it is not validating the length either — the check that
+matters is a byte-for-byte rebuild from the OFFER parameters (§5.3, §5.4).
 
 ### 3.2 FBC-side script
 
@@ -151,21 +166,30 @@ address    = segwit v0 P2WSH, bc1q… (mainnet) / tb1q… (testnet) / bcrt1q… 
 
 ### 3.4 Spending witnesses
 
-Claim branch (revealing preimage `s`):
+Claim branch (revealing preimage `s`), as a witness *stack* — four items, bottom to top:
 
 ```
-<signature> <s:32> 01      # trailing 0x01 selects OP_IF branch
+<signature> <s:32> <0x01>  # a 1-byte item 0x01 selects the OP_IF branch
 <witness_script>
 ```
 
-Refund branch (after timelock expires):
+Refund branch (after timelock expires) — three items:
 
 ```
-<signature> 00             # 0x00 selects OP_ELSE branch
+<signature> <empty>        # a ZERO-LENGTH item selects the OP_ELSE branch
 <witness_script>
 ```
 
-The spending transaction in the refund case MUST set `nLockTime ≥ timelock` and input `nSequence < 0xFFFFFFFF` (typically `0xFFFFFFFE`) so that `OP_CHECKLOCKTIMEVERIFY` evaluates against the transaction's locktime field. This applies identically on both chains.
+The refund selector is an empty stack item, **not** a one-byte `0x00`. Both cast to false
+under consensus rules, but segwit v0 spends are checked against MINIMALIF as relay policy:
+the argument to `OP_IF` must be exactly empty or exactly `0x01`, so a literal `0x00` byte
+produces a refund that no node will relay and that the refunder cannot fee-bump out of the
+problem. The 32-byte preimage on the claim side is a real push; only the selector is
+constrained.
+
+The spending transaction in the refund case MUST set `nLockTime ≥ timelock` and input `nSequence < 0xFFFFFFFF` so that `OP_CHECKLOCKTIMEVERIFY` evaluates against the transaction's locktime field. This applies identically on both chains.
+
+The reference implementations use `nSequence = 0xFFFFFFFD` on **both** branches, not `0xFFFFFFFE`. It satisfies the CLTV requirement above and is also below `0xFFFFFFFE`, which is what opts the transaction into BIP 125 RBF — and a refund is exactly the transaction that must not become unbumpable while its deadline recedes (§6.2). Using `0xFFFFFFFE` is valid but strands a stalled refund at whatever fee it was first broadcast with.
 
 ---
 
@@ -177,15 +201,28 @@ Timelocks are encoded as absolute block heights, not Unix timestamps. This avoid
 
 ### 4.2 Recommended values
 
-| Parameter | Description                         | Mainnet default | Regtest default |
-|-----------|-------------------------------------|-----------------|-----------------|
-| `T1`      | Alice's BTC refund height           | tip + 144       | tip + 10        |
-| `T2`      | Bob's FBC refund height             | tip + 1440      | tip + 50        |
-| `Δ`       | Wall-clock buffer (T2 − T1)         | ≥ 24 hours      | ≥ 10 min        |
+| Parameter | Description                         | Default (all networks) |
+|-----------|-------------------------------------|------------------------|
+| `T1`      | Alice's BTC refund height           | tip + 288              |
+| `T2`      | Bob's FBC refund height             | tip + 720              |
+| `Δ`       | Wall-clock buffer (T1 − T2)         | 24 hours (floor: 12h)  |
 
-Rationale for mainnet: BTC targets 600s blocks, FBC targets 120s blocks. 144 BTC blocks ≈ 24h, 1440 FBC blocks ≈ 48h. The 24-hour buffer is sized so that Bob, after observing `s` on the FBC chain, has ample time to build, broadcast, and confirm a BTC claim transaction even through a hash-rate dip or mempool congestion.
+Rationale: BTC targets 600s blocks, FBC targets 120s blocks. 288 BTC blocks ≈ 48h, 720 FBC blocks ≈ 24h. Alice's refund opens 24h *after* Bob's.
 
-`Δ` MUST be ≥ 12h in wall-clock terms on mainnet. Offers violating this MUST be rejected by accepting parties.
+There is no separate regtest relaxation, and this table used to claim one (`tip + 50` /
+`tip + 10`, `Δ ≥ 10 min`). `checkTimelocks` in `web/core` has no network branch: the 12h Δ
+floor and the 600s/120s block constants apply on regtest exactly as on mainnet, so those
+old regtest heights work out at Δ = 8h with a `T2` inside the §4.3 floor and are rejected
+at accept time. Use the same heights on regtest and mine blocks to move the tips. A maker
+bot can lower its own quoted windows (`BTC_REFUND_HOURS`, `FBC_REFUND_HOURS`,
+`MIN_DELTA_HOURS`) for local testing, but the browser library will still refuse anything
+under 12h, so lowering them only moves the failure.
+
+The buffer exists for Bob, and its size is set by Bob's worst case. Bob learns `s` only when Alice spends the FBC HTLC, and the last moment she can do that is just before `T2`. From that instant Bob must build, broadcast and confirm a BTC claim before `T1`. So the interval he is guaranteed is exactly `T1 − T2`, and it must absorb a hash-rate dip or mempool congestion on the BTC side.
+
+Sizing the buffer the other way round — giving the FBC leg the longer lock — creates the window `[T1, T2)` in which Alice can refund her BTC *and* still claim the FBC, taking both legs. Any implementation that enforces `T2 > T1` is broken; see §9.1.
+
+`Δ` MUST be ≥ 12h in wall-clock terms on mainnet. Offers violating this MUST be rejected by accepting parties. Because the two heights live on independent chains, `Δ` MUST be evaluated in wall-clock seconds — `(T1 − btc_ref) × 600` versus `(T2 − fbc_ref) × 120` — never by comparing raw heights.
 
 ### 4.3 Height synchronization
 
@@ -194,13 +231,25 @@ Because `T1` and `T2` refer to heights on different chains whose current tips ad
 - `btc_reference_height` — the BTC tip height at the time the offer was authored
 - `fbc_reference_height` — the FBC tip height at the time the offer was authored
 
-The accepting party MAY reject an offer if either reference height is more than 10 blocks behind the accepter's observed tip at evaluation time.
+The accepting party **MUST** independently observe both tips and reject the offer unless:
+
+- `btc_reference_height` is within 10 blocks of the observed BTC tip, and `fbc_reference_height` is within 20 blocks of the observed FBC tip (in either direction — a reference height *ahead* of the observed tip is as suspect as a stale one);
+- `T1` is at least `btc_conf_target + 6` blocks above the observed BTC tip (12 at the default 6-conf target), so Alice's refund branch is not already live or about to be;
+- `T2` is at least **60 FBC blocks (~2h)** above the observed FBC tip. This floor is sized for the party who has to *claim* that leg, not the one who funds it: Alice must first wait out `fbc_conf_target` (12 blocks, ~24 min) before claiming is safe, and then land the claim with the §6.1 margin of 6 blocks to spare. A `T2` only `fbc_conf_target + 6` blocks out — which is what this section used to require — is therefore already gone by the time she is allowed to act, and a claim broadcast after Bob's refund is live reveals `s` while the BTC leg is still spendable by him, handing him both legs;
+- `T1` and `T2` are not absurdly far out — reject beyond ~7 days of wall clock on either chain.
+
+Reference heights are supplied by the counterparty. Validating `Δ` using only the numbers inside the OFFER is circular: an attacker chooses both the refund height and the reference height it is measured against, so any relative check can be made to pass while the absolute height is already in the past. The wall-clock `Δ` check in §4.2 is necessary but **not sufficient on its own** — it MUST be paired with the absolute checks above, computed against locally observed tips.
 
 ---
 
 ## 5. Message formats
 
-All messages are JSON with `version` field = 1. Integer amounts are expressed in base units (satoshis for BTC, dollarydoos for FBC — 1 FBC = 1,000,000 dollarydoos). Binary values are lowercase hex. All fields are REQUIRED unless explicitly optional.
+All messages are JSON with `version` field = 1. Integer amounts are expressed in base units — never decimal coin amounts:
+
+- `amount_btc`, `funding_amount` (BTC leg): **satoshis**, 1 BTC = 100,000,000 sat.
+- `amount_fbc`, `funding_amount` (FBC leg): **dollarydoos**, 1 FBC = 1,000,000 dollarydoos. The reference code and `MM_API.md` call this same unit **bumps**; the two names are interchangeable and there is no third unit.
+
+Binary values are lowercase hex. All fields are REQUIRED unless explicitly optional.
 
 ### 5.1 OFFER
 
@@ -216,12 +265,12 @@ Sent by Alice to Bob out-of-band.
   "alice_fbc_pubkey": "02…66 hex chars…",
   "amount_btc": 50000,
   "amount_fbc": 100000000,
-  "btc_refund_height": 860144,
-  "fbc_refund_height": 710440,
+  "btc_refund_height": 860288,
+  "fbc_refund_height": 709720,
   "btc_reference_height": 860000,
   "fbc_reference_height": 709000,
   "expires_at": "2026-04-16T00:00:00Z",
-  "offer_id": "01JKWP…26 hex chars…"
+  "offer_id": "9f86d0818840…32 hex chars…"
 }
 ```
 
@@ -237,7 +286,7 @@ Sent by Bob to Alice in reply.
 {
   "version": 1,
   "kind": "accept",
-  "offer_id": "01JKWP…",
+  "offer_id": "9f86d0818840…",
   "bob_btc_pubkey": "03…",
   "bob_fbc_pubkey": "03…"
 }
@@ -251,7 +300,7 @@ Sent by Alice after broadcasting the BTC HTLC funding tx.
 {
   "version": 1,
   "kind": "funded_btc",
-  "offer_id": "01JKWP…",
+  "offer_id": "9f86d0818840…",
   "funding_txid": "…64 hex chars…",
   "funding_vout": 0,
   "funding_amount": 50000,
@@ -274,7 +323,7 @@ Sent by Bob after broadcasting the FBC HTLC funding tx.
 {
   "version": 1,
   "kind": "funded_fbc",
-  "offer_id": "01JKWP…",
+  "offer_id": "9f86d0818840…",
   "funding_txid": "…64 hex chars…",
   "funding_vout": 0,
   "funding_amount": 100000000,
@@ -294,8 +343,13 @@ Alice MUST independently verify:
 Blobs are JSON strings wrapped in the envelope:
 
 ```
-fistbump-swap:v1:<base64url(json_blob)>
+fistbump-swap:v1:<base64url_nopad(json_blob)>
 ```
+
+The payload is base64url (RFC 4648 §5, `-`/`_` alphabet) with **padding omitted**. This is
+not cosmetic: `web/core`'s decoder is a strict `base64urlnopad`, so a blob carrying trailing
+`=` is rejected outright rather than tolerated. Encoders must strip padding; decoders should
+not add it back.
 
 Users copy-paste this single-line envelope via any out-of-band channel (Signal, email, QR code). The envelope prefix lets UIs auto-detect blobs pasted into the app. No transport-layer authentication is provided; blob integrity is established by the on-chain commitments each party independently verifies.
 
@@ -308,22 +362,37 @@ Users copy-paste this single-line envelope via any out-of-band channel (Signal, 
 | Alice sends OFFER, Bob never responds                   | No funds moved; Alice discards offer.                                       |
 | Bob ACCEPTs, Alice never funds BTC                      | No funds moved; Bob discards accept.                                        |
 | Alice funds BTC, Bob never funds FBC                    | Alice waits until block `T1`, refunds via REFUND branch of BTC HTLC.        |
-| Both funded, Alice never claims FBC                     | Alice refunds BTC at `T1`; Bob refunds FBC at `T2`.                         |
-| Alice claims FBC but Bob doesn't claim BTC by `T1`      | Alice refunds BTC at `T1`. Bob forfeits his FBC. (Bob's operational failure.)|
-| Chain reorg after a claim                               | Claim tx re-confirms on replacement chain; `s` remains public. Idempotent. |
-| `T1` passes while BTC claim tx is in mempool            | Race. See §6.1.                                                             |
+| Both funded, Alice never claims FBC                     | Bob refunds FBC at `T2`; Alice refunds BTC at `T1`, which is later.         |
+| Alice claims FBC but Bob doesn't claim BTC by `T1`      | Alice refunds BTC at `T1`. Bob forfeits his FBC. (Bob's operational failure — he had at least `Δ` after `s` went public.) |
+| Chain reorg after a claim                               | Usually self-healing: the claim is re-mined from the mempool and `s` stays public. Not automatic — see §6.3. |
+| `T2` passes while Alice's FBC claim tx is in mempool    | Race. See §6.1.                                                             |
 
-### 6.1 T1 race condition
+### 6.1 T2 race condition
 
-If Bob broadcasts his BTC claim tx close to `T1`, Alice's refund tx becomes valid at `T1` and could compete. To mitigate:
+`T2` is the contended deadline, because it is the point where Alice's claim branch and Bob's refund branch are both spendable. `T1` is not contended in the same way: by the time Alice's refund opens, Bob has already had `Δ` to claim, and if he did not, he has simply forfeited.
 
-- Bob MUST broadcast the BTC claim ≥ 6 blocks before `T1`. Wallets MUST warn if the margin is smaller.
-- Alice's wallet MUST NOT broadcast a refund before block `T1` is confirmed, and SHOULD wait 2 additional blocks past `T1` before broadcasting refund, to let any already-inclusion-bound claim land first.
+- Alice MUST broadcast her FBC claim ≥ 6 FBC blocks before `T2`, and wallets MUST warn if the margin is smaller. A claim that loses the race to Bob's refund also leaks `s` while the BTC HTLC is still live, so Alice must treat a near-`T2` claim as unsafe rather than merely unlucky.
+- Bob's wallet MUST NOT broadcast an FBC refund before block `T2` is confirmed, and SHOULD wait 2 additional blocks past `T2` to let any already-inclusion-bound claim land first.
+- Bob MUST claim the BTC HTLC as soon as `s` is observed, and MUST fee-bump (§6.2) rather than wait, since his deadline is `T1`.
 - `Δ` of 24h on mainnet provides ample margin; tightening `Δ` below 12h is prohibited (§4.2).
 
 ### 6.2 Fee-bumping
 
 Because HTLC claim/refund txs are time-sensitive, both wallets SHOULD use RBF (BIP 125) signaling on BTC and the FBC equivalent (FBC inherits Bitcoin's sequence-based RBF) when broadcasting claim/refund transactions, so fees can be bumped if the tx stalls near the timelock deadline.
+
+### 6.3 A broadcast spend is not a settled spend
+
+Nothing in this protocol treats a claim or refund as done when it is broadcast, or when it
+first appears in a block. Both wallets MUST track their own claim/refund transactions to a
+burial depth of more than one confirmation, and MUST resume bumping (§6.2) if the depth goes
+back to zero.
+
+The failure this prevents is quiet. A claim that is dropped from the mempool, or evicted by
+a one-block reorg, leaves the HTLC unspent while the wallet believes the swap is finished —
+and the counterparty's refund branch is still counting down. On the BTC leg that means
+losing the whole amount at `T1` to a party who has already handed over `s`. The reference
+market maker treats a swap as terminal only after its spend is buried; a wallet that stops
+at "broadcast succeeded" has no way to notice it needs to act again.
 
 ---
 
@@ -346,7 +415,7 @@ A practical UI SHOULD display "you will receive approximately X after fees" esti
 
 **Minimum amounts:**
 
-- BTC side: `amount_btc` ≥ 10,000 sat. A P2WSH HTLC spend costs ~150 vbytes; at 50 sat/vB (mainnet high-fee regime), the claim consumes 7,500 sats. Below 10k the claim is uneconomic.
+- BTC side: `amount_btc` ≥ 10,000 sat. A P2WSH HTLC claim spend is ~139 vbytes: 82 non-witness (header, one input, one P2WPKH output, locktime) plus a 226-weight-unit witness (72-byte signature, 32-byte preimage, 1-byte selector, 114-byte script, with length prefixes and marker/flag), discounted 4×. The refund path is ~130 vbytes — same shape without the preimage. At 50 sat/vB (mainnet high-fee regime) the claim costs ~7,000 sats, so below 10k it is uneconomic.
 - FBC side: `amount_fbc` ≥ 1,000,000 dollarydoos (1 FBC). FBC fees are low, but the lower bound prevents swaps too small to be worth the operational risk.
 
 **Maximum amounts:**
@@ -357,7 +426,7 @@ No protocol maximum. Wallets SHOULD warn users about single-swap exposures above
 
 ## 9. Security properties
 
-1. **Atomicity.** Either both claims succeed or both refunds succeed. Any state in which one party gains both assets is unreachable given honest timelock enforcement by miners on both chains.
+1. **Atomicity.** Either both claims succeed or both refunds succeed. Any state in which one party gains both assets is unreachable given honest timelock enforcement by miners on both chains — **but only because `T1 > T2`** (§4.2). Atomicity here is a property of the timelock ordering, not of the scripts: the scripts are symmetric, and reversing the ordering makes the "one party gains both assets" state trivially reachable by Alice, who refunds her BTC at `T1` and then claims the FBC any time before `T2`. Implementers MUST treat the `Δ` direction as consensus-critical and test it in both directions.
 2. **Non-custodial.** Neither party, nor any third party, can spend the counterparty's funds. Alice's BTC HTLC can only be spent by Bob (with `s`) or Alice (after `T1`). Bob's FBC HTLC can only be spent by Alice (with `s`) or Bob (after `T2`).
 3. **Hashlock privacy.** Anyone observing both chains can trivially correlate the two legs by matching `h`. This is a fundamental property of HTLC swaps and is not addressed in v1. Adaptor signatures (Schnorr) would resolve this; deferred to v2.
 4. **Replay resistance.** Each swap uses a fresh `s`. Reusing `s` across swaps breaks security: a single reveal exposes all HTLCs with the same `h`. Wallets MUST sample `s` from a CSPRNG per-swap.
@@ -366,7 +435,7 @@ No protocol maximum. Wallets SHOULD warn users about single-swap exposures above
 
 ## 10. Non-goals for v1
 
-Explicitly out of scope:
+Explicitly out of scope **of this document**:
 
 - Discovery, order books, matching engines.
 - Fee markets, auctions, price oracles.
@@ -380,6 +449,16 @@ Explicitly out of scope:
 
 These may be future versions; they are deliberately excluded here to keep the first implementation's attack surface minimal and the lawyer-readable description crisp.
 
+"Out of scope of this document" is not the same as "absent from this repository", and the
+first two bullets are where that now bites. The repo ships `swap/bot` — a reference market
+maker that prices swaps off a live BTC/USD feed (Coinbase or Kraken) — and `registry/`, a
+maker directory intended for deployment at `swap.fistbump.org/api`. Neither is part of the
+settlement protocol: a maker is simply an always-online Alice or Bob, and the registry is a
+phone book that never sees a key or a swap. Both are specified in `MM_API.md`, and both are
+optional — two humans pasting blobs still need nothing but this document. But anyone
+reasoning about what the project *operates* (Appendix C) should read that file, not this
+list.
+
 ---
 
 ## 11. Implementation notes
@@ -391,16 +470,20 @@ Lessons from the first mainnet swap (2026-04-15):
 3. **BTC claim fee floor** of 3 sat/vB is enforced. Below 1 sat/vB, Bitcoin Core nodes refuse to relay and the claim can stall indefinitely. Claims also signal BIP 125 RBF (`nSequence = 0xFFFFFFFD`) so fees can be bumped if needed.
 4. **BTC funding vout** must be detected from on-chain data, not assumed to be 0. Wallet coin-selection output ordering is not guaranteed.
 5. **FBC claim broadcast** must be chained with signing. The wallet extension's `signHtlcSpend` signs AND broadcasts atomically; if broadcast fails, the signed tx hex is returned so the caller can retry.
-6. **Bob MUST validate `T2 > T1` in wall-clock time** (§4.2) before funding — compare `(T2 − fbc_ref) × 120s` against `(T1 − btc_ref) × 600s`, not raw heights. Without this, Alice can claim FBC and then refund her BTC, taking both sides. Enforced in both the core library and the frontend.
-7. **Blockstream Esplora** (`blockstream.info/api`) is used for BTC tip height, fee estimates, and broadcast. Explorer links use 3xpl.com.
+6. **Bob MUST validate `T1 > T2 + Δ` in wall-clock time** (§4.2) before funding — compare `(T1 − btc_ref) × 600s` against `(T2 − fbc_ref) × 120s`, not raw heights. Without this, Alice refunds her BTC at `T1` and *then* claims the FBC before `T2`, taking both sides. Bob MUST additionally validate both reference heights and both refund heights against his own observed tips (§4.3) — the wall-clock check alone is circular, since Alice supplies every number in it. Enforced in the core library, the frontend, and the reference market maker.
+
+   Versions of this spec before 2026-07-28 stated this rule with the inequality reversed (`T2 > T1`), and the reference implementations enforced it as written. That is a total-loss bug for Bob, not a conservatism tradeoff. Any implementation still enforcing `T2 > T1` must be treated as compromised.
+7. **BTC chain access differs by implementation, deliberately.** The browser frontend (`web/app`) reads tip height and fee estimates from **Blockstream Esplora** (`blockstream.info/api`) and broadcasts there too, because a browser has no node; explorer links use 3xpl.com. The reference market maker (`swap/bot`) does **not**: it requires Bitcoin Core JSON-RPC for every tip read, outpoint check, and broadcast, with no explorer fallback. An always-online maker decides whether to part with inventory based on those reads, and a third-party explorer that lies (or is MITM'd, or is simply behind) can talk it into funding against a `T1` that has already passed.
 
 ---
 
 ## 12. Reference implementations
 
-- **Browser library** — `web/core`. TypeScript, runs in any modern browser. Uses the Fistbump wallet extension (`window.fistbump`) for FBC signing and a WIF-based in-browser signer (or BIP-174-compatible BTC wallet) for BTC signing.
+- **Browser library** — `web/core`. TypeScript, runs in any modern browser. Uses the Fistbump wallet extension (`window.fistbump`) for FBC signing. BTC signing is delegated to Unisat where it accepts the input, and otherwise to an exported PSBT signed elsewhere — hardware wallets cannot sign these scripts (see README, *BTC wallet support*).
 - **Frontend** — `web/app`. Static HTML+JS. Hosted at `swap.fistbump.org`. Pure client-side; server ships only static files.
 - **Swift (fbd)** — `Script.htlc` + `WalletHTLC` + RPC handlers in the [fbd](https://github.com/fistbump-org/fbd) repository. Authoritative script construction and FBC-side signing.
+- **Market maker** — `bot`. Node/TypeScript. An always-online principal that plays Bob (or Alice) over HTTP instead of blob paste; requires Bitcoin Core and fbd. Protocol in `MM_API.md`. Note it carries its **own copy** of the timelock rules (`bot/src/timelocks.ts`), which must be kept in step with `web/core/src/offer.ts` — they are not shared code.
+- **Maker registry** — `registry`. A directory of maker URLs. Holds no keys and sees no swaps.
 
 The Fistbump wallet extension gains three new methods to drive the FBC leg: `getPublicKey`, `fundHtlc`, and `signHtlcSpend`. See the wallet repository for the page-facing API contract.
 
@@ -413,13 +496,16 @@ The Fistbump wallet extension gains three new methods to drive the FBC leg: `get
 - `h` = `0xdeadbeef…` (32 bytes)
 - `B_btc` = `0x02…` (33 bytes)
 - `A_btc` = `0x02…` (33 bytes)
-- `T1` = `860144` (push: `03 70 1e 0d` — minimal push of 3-byte little-endian)
+- `T1` = `860288` (push: `03 80 20 0d` — minimal push of 3-byte little-endian)
 
 Script:
 
 ```
-63 a8 20 <h> 88 21 <B_btc> ac 67 03 701e0d b1 75 21 <A_btc> ac 68
+63 a8 20 <h> 88 21 <B_btc> ac 67 03 80200d b1 75 21 <A_btc> ac 68
 ```
+
+114 bytes (§3.1). Note that `T1` (BTC, Alice's refund) is the *longer* of the two locks; the A.2 FBC script
+carries `T2`, which must be at least `Δ` earlier in wall-clock terms (§4.2).
 
 Address:
 
@@ -490,3 +576,19 @@ This protocol is designed to be operable by the authoring entity as a publisher 
 - Out-of-band counterparty discovery is the user's responsibility.
 
 This posture mirrors the non-custodial software distribution model affirmed by FinCEN 2019 guidance (FIN-2019-G001, §4.2). It is NOT legal advice; it is a technical design description intended to be reviewable by counsel before deployment. Counsel review is required before operating `swap.fistbump.org`.
+
+**Scope warning — the five bullets above describe the blob-paste UI only, and the repository
+now contains more than that.** Stated as facts, not as a legal opinion, and flagged here so
+counsel is not reviewing a description that has drifted from the code:
+
+- `bot` derives its own prices from a live BTC/USD feed. Whoever runs a maker is doing price
+  discovery, and is a principal trading its own inventory — bullets 1 and 2 hold only for a
+  party that runs no maker.
+- `registry` is a server. `MM_API.md` names `https://swap.fistbump.org/api` as the intended
+  public registry, which is a backend service on the same origin as the static UI; bullet 3
+  is written as if none existed.
+- The Auto swap UI selects a maker from that registry on the user's behalf when they have no
+  prior choice, which is not what bullet 5 describes.
+
+Which of these the authoring entity actually intends to *operate* is a product decision this
+document cannot answer. Resolve it before treating Appendix C as current.

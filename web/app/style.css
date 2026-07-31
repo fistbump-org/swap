@@ -549,6 +549,7 @@ body.nav-open { overflow: hidden; }
 }
 .toast.ok { border-color: rgba(74, 222, 128, 0.35); }
 .toast.error { border-color: rgba(239, 68, 68, 0.35); }
+.toast.warn { border-color: rgba(251, 191, 36, 0.4); }
 .toast.fade-out { animation: toast-out 0.22s ease-in forwards; }
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(6px); }

@@ -1,0 +1,21 @@
+// Typecheck the tests too.
+//
+// The main tsconfig covers `src` only, and the suite runs under tsx, which
+// strips types without checking them. So a fixture could drift from the type
+// it claims to be and nothing would say anything — a `Swap` literal missing a
+// required field just carried `undefined` into the assertions.
+//
+// That is not hypothetical: it is how `disclosure.test.ts` came to iterate a
+// hand-written object while believing it was enumerating `Swap`, and it is how
+// the `side` field could have been added with every fixture silently unset.
+//
+// Separate file rather than widening the main one, because `rootDir: "src"`
+// and `outDir` are about the build, and the tests are not built.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src/**/*", "test/**/*"]
+}

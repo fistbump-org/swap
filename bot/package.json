@@ -1,0 +1,26 @@
+{
+  "name": "@fistbump/mm-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Market-maker bot for BTC\u2192FBC atomic swaps. Holds FBC inventory; claims BTC after user reveals preimage.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -p . --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test:unit": "BTC_REFUND_HOURS=48 FBC_REFUND_HOURS=24 BTC_NETWORK=main FBD_NETWORK=main node --test --import=tsx ./test/*.test.ts",
+    "test": "npm run typecheck && npm run test:unit"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1",
+    "@scure/base": "^1.2.4",
+    "@scure/bip32": "^1.7.0",
+    "@scure/btc-signer": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

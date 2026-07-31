@@ -1,0 +1,4 @@
+__pycache__/
+# Default REGISTRY_DATA. Runtime state only — every entry expires in TTL_SEC —
+# and it lists the URLs of live makers, so it is never something to commit.
+data/
