@@ -49,7 +49,8 @@ Bots self-register so UIs do not require pasting URLs. The registry is a **phone
 | `GET` | `{registry}/v1/makers` | Live list (TTL heartbeats) |
 | `POST` | `{registry}/v1/makers/announce` | Register / heartbeat |
 
-**Announce body:** `{ "url", "name", "side", "protocol", "note?" }`
+**Announce body:** `{ "url", "name", "taker_sides", "protocol", "note?" }`
+(`side` is still accepted as the old name for `taker_sides`.)
 
 Announcing requires **proof that you control the URL you are claiming**. The UI auto-selects the best-priced maker for anyone who has not used it before, so getting listed is being trusted with a stranger's funds — an open announce endpoint lets anybody put themselves in that position.
 
@@ -98,6 +99,7 @@ Public maker metadata for UIs.
 ```json
 {
   "protocol": "fistbump-swap-mm/v1",
+  "taker_sides": ["buy_fbc"],
   "side": "buy_fbc",
   "sides": ["buy_fbc"],
   "liquidity": "fbc",
@@ -115,8 +117,9 @@ Public maker metadata for UIs.
 
 | Field | Meaning |
 |--------|---------|
-| `sides` | Every side you serve, as a list. This is the field to read. |
-| `side` | The first entry of `sides`, kept for older clients. What the **taker** can do with you. `buy_fbc` = taker pays BTC, receives FBC (you supply FBC). `sell_fbc` = taker pays FBC, receives BTC (you supply BTC). A maker may support one or both (see quote `side`). |
+| `taker_sides` | Every side you serve, as a list, **named from the taker's point of view** — which is the only view `Side` has. This is the field to read. `buy_fbc` = the taker pays BTC and receives FBC, so **you supply FBC**. `sell_fbc` = the taker pays FBC and receives BTC, so you supply BTC. A maker may serve one or both. |
+| `liquidity` | What you actually hold and hand out — `fbc` or `btc`. The maker-relative fact, and the one to read if you want to know what a maker *is*. |
+| `sides`, `side` | Deprecated names for `taker_sides`. Kept so older clients keep working; do not use them in new code. A maker listed as `side: "buy_fbc"` **sells** FBC, which is exactly the confusion the rename removes. |
 | `liquidity` | What inventory you advertise (`fbc`, `btc`, or `both`). |
 | `mid_fbc_per_btc` | Whole FBC per whole BTC (a price). The example means 1 BTC ≈ 42,000 FBC. |
 | `spread_bps` | Your half-spread in basis points (informational). |

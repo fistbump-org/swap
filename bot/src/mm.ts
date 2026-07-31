@@ -123,9 +123,15 @@ export class MarketMaker {
     const px = lastPrice();
     return {
       protocol: "fistbump-swap-mm/v1",
-      // `side` is the historical single-valued field; `sides` is the list a
-      // client should actually read. Both from SERVED_SIDES so they cannot
-      // disagree about what this maker will quote.
+      // What a TAKER can ask for here, which is the only reading `Side` has —
+      // roles.ts defines buy_fbc as the taker paying BTC. On a record that
+      // describes a maker, a bare `side: "buy_fbc"` says the opposite of the
+      // truth to anyone who has not read roles.ts: this maker SELLS FBC.
+      //
+      // `liquidity` below is the maker-relative fact and was always right.
+      taker_sides: SERVED_SIDES,
+      // Deprecated, kept so an existing client is not broken by the rename.
+      // Same source, so they cannot disagree about what this maker quotes.
       side: SERVED_SIDES[0],
       sides: SERVED_SIDES,
       liquidity: "fbc",
@@ -761,8 +767,10 @@ export class MarketMaker {
   listTrades(opts: { since?: number; limit?: number } = {}) {
     return this.store.listSettledSwaps(opts).map((s) => ({
       swap_id: s.swap_id,
+      /** What the TAKER did. Named for its perspective; `side` is the old key. */
+      taker_side: s.side,
       side: s.side,
-      /** What WE did. `side` is taker-relative — see makerActionLabel. */
+      /** What WE did. The inverse — see makerActionLabel. */
       maker_action: makerActionLabel(s.side),
       // When it reached burial depth, not when it was quoted. A trade is real
       // once it cannot be reorged away.
@@ -802,8 +810,10 @@ export class MarketMaker {
   listSettling(opts: { limit?: number } = {}) {
     return this.store.listSettlingSwaps(opts).map((s) => ({
       swap_id: s.swap_id,
+      /** What the TAKER did. Named for its perspective; `side` is the old key. */
+      taker_side: s.side,
       side: s.side,
-      /** What WE did. `side` is taker-relative — see makerActionLabel. */
+      /** What WE did. The inverse — see makerActionLabel. */
       maker_action: makerActionLabel(s.side),
       settling_since: s.btc_claim_broadcast_at ?? s.updated_at,
       amount_btc_sat: s.offer.amount_btc,

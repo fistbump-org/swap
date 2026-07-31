@@ -540,6 +540,13 @@ def _list_makers() -> list[dict[str, Any]]:
                 {
                     "name": rec.get("name") or url,
                     "url": url,
+                    # What a TAKER can ask this maker for. `Side` is defined
+                    # from the taker's view — buy_fbc means the taker pays BTC
+                    # — so a bare `side` on a maker record reads as the exact
+                    # opposite of the truth: a maker listed as "buy_fbc" SELLS
+                    # FBC. The perspective is in the name now.
+                    "taker_sides": rec.get("side") or ["buy_fbc"],
+                    # Deprecated alias, so an existing client keeps working.
                     "side": rec.get("side") or ["buy_fbc"],
                     "note": rec.get("note") or "",
                     "protocol": rec.get("protocol") or "fistbump-swap-mm/v1",
@@ -706,7 +713,9 @@ def _announce(body: dict[str, Any], client_ip: str, token: str) -> dict[str, Any
             "some other hostname"
         )
     name = name or own_host
-    side = body.get("side") or ["buy_fbc"]
+    # Accept either key. A maker announcing `taker_sides` is speaking the
+    # current protocol; `side` is what older ones send.
+    side = body.get("taker_sides") or body.get("side") or ["buy_fbc"]
     if isinstance(side, str):
         side = [side]
     if not isinstance(side, list) or not side:
