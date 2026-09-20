@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <!--
-  Defense-in-depth CSP. All scripts + styles are self-hosted; the only
-  outbound traffic is the two chain indexers we explicitly allowlist.
+  Defense-in-depth CSP. Styles and all swap logic are self-hosted; outbound
+  traffic is limited to the chain indexers and the self-hosted analytics
+  endpoint (stats.fistbump.org), each explicitly allowlisted.
   If a meta CSP conflicts with a server-set header, the intersection wins —
   this is the floor, not the ceiling.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://blockstream.info https://mempool.space https://explorer.fistbump.org; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://stats.fistbump.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://blockstream.info https://mempool.space https://explorer.fistbump.org https://stats.fistbump.org; frame-ancestors 'none'; base-uri 'self'; form-action 'self'">
 <title>Swap | Fistbump</title>
 <meta name="description" content="Trustless peer-to-peer atomic swaps between Bitcoin and Fistbump. No custody, no matching, no fees.">
 <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
@@ -27,6 +28,7 @@
   ./core/bundle.js that inlines @noble/hashes, @scure/base, and
   @scure/btc-signer. Rebuild with `./build.sh` after changing core sources.
 -->
+<script async src="https://stats.fistbump.org/s/2535be2c-3770-46cb-94bd-f417e2c236a2.js"></script>
 </head>
 <body>
 

@@ -10,12 +10,14 @@
   127.0.0.1 by default) and for the local registry.
   script-src has no 'unsafe-inline': every script on this page is an external
   file. Keep it that way — inline <script> or on* attributes will silently break.
+  stats.fistbump.org is the self-hosted analytics origin; it is allowlisted for
+  scripts only, and its beacons ride the any-https connect-src above.
   frame-ancestors CANNOT live here: browsers ignore it in a <meta> CSP. It has to
   be sent by the web server as a `Content-Security-Policy: frame-ancestors 'none'`
   response header (plus `X-Frame-Options: DENY` for old clients). Until the vhost
   serving this directory does that, the page is frameable.
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https: http://127.0.0.1:* http://localhost:* http://[::1]:*; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://stats.fistbump.org; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https: http://127.0.0.1:* http://localhost:* http://[::1]:*; base-uri 'self'; form-action 'self'">
 <title>Swap | Fistbump</title>
 <meta name="description" content="Buy FBC with BTC via automated atomic swap.">
 <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
@@ -29,6 +31,7 @@
 <link rel="stylesheet" href="/fistbump.css">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/auto/style.css">
+<script async src="https://stats.fistbump.org/s/2535be2c-3770-46cb-94bd-f417e2c236a2.js"></script>
 </head>
 <body class="auto-page">
 
